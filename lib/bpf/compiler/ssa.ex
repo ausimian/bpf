@@ -1,10 +1,5 @@
 defmodule BPF.Compiler.SSA do
-  @moduledoc """
-  Single Static Assignment (SSA) intermediate representation for BPF compilation.
-
-  Converts IR clauses into SSA form with virtual registers, enabling
-  liveness analysis and optimal register allocation.
-  """
+  @moduledoc false
 
   alias BPF.IR.Clause
 

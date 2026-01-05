@@ -1,17 +1,5 @@
 defmodule BPF.Compiler.RegAlloc do
-  @moduledoc """
-  Register allocation for BPF using linear scan algorithm.
-
-  BPF has limited registers:
-  - A: Accumulator (all operations flow through here)
-  - X: Index register (used for comparison RHS, some ALU ops)
-  - M[0-15]: 16 scratch memory slots
-
-  Allocation strategy:
-  1. Values used immediately after definition stay in A (no slot needed)
-  2. Values with longer live ranges get scratch slots
-  3. Slots are reused when live ranges don't overlap
-  """
+  @moduledoc false
 
   @max_scratch_slots 16
 
@@ -19,8 +7,8 @@ defmodule BPF.Compiler.RegAlloc do
   Allocate registers for SSA operations.
 
   Returns a map from vreg to allocation:
-  - :a - Keep in accumulator (ephemeral)
-  - {:mem, slot} - Store in scratch memory slot
+  - `:a` - Keep in accumulator (ephemeral)
+  - `{:mem, slot}` - Store in scratch memory slot
   """
   def allocate(ops, liveness) do
     # Sort vregs by definition order

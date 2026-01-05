@@ -1,12 +1,5 @@
 defmodule BPF.Compiler do
-  @moduledoc """
-  Compiles IR clauses to BPF instructions.
-
-  Takes `BPF.IR.Clause` structs and produces a list of BPF instruction tuples
-  that can be executed by the interpreter or serialized to bytecode.
-
-  Uses SSA-based compilation with optimized register allocation.
-  """
+  @moduledoc false
 
   alias BPF.IR.Pattern
   alias BPF.Program

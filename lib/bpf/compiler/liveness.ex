@@ -1,11 +1,5 @@
 defmodule BPF.Compiler.Liveness do
-  @moduledoc """
-  Liveness analysis for SSA operations.
-
-  Computes live ranges for each virtual register, determining where
-  values are defined and last used. This enables register allocation
-  to reuse scratch slots when values are no longer live.
-  """
+  @moduledoc false
 
   @doc """
   Analyze liveness of SSA operations.

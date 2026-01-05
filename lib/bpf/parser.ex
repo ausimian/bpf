@@ -1,12 +1,5 @@
 defmodule BPF.Parser do
-  @moduledoc """
-  Parses Elixir AST from binary pattern matching functions into IR.
-
-  Takes quoted expressions like:
-      quote do: fn <<4::4, flags::4, _::binary>> when flags == 8 -> true end
-
-  And produces `BPF.IR.Clause` structs.
-  """
+  @moduledoc false
 
   alias BPF.IR.{Segment, Pattern, Guard, Clause}
 

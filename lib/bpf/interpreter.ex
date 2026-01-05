@@ -1,22 +1,5 @@
 defmodule BPF.Interpreter do
-  @moduledoc """
-  BPF program interpreter.
-
-  Executes BPF instructions on a packet (binary data) and returns
-  the result. Useful for testing compiled BPF programs without
-  needing to load them into the kernel.
-
-  ## Example
-
-      iex> prog = BPF.Program.new([
-      ...>   {:ld, :b, [:k, 0]},
-      ...>   {:jmp, :jeq, :k, 0x45, 0, 1},
-      ...>   {:ret, :k, 0xFFFFFFFF},
-      ...>   {:ret, :k, 0}
-      ...> ])
-      iex> BPF.Interpreter.run(prog, <<0x45, 0x00, 0x00, 0x14>>)
-      {:ok, 0xFFFFFFFF}
-  """
+  @moduledoc false
 
   import Bitwise
 

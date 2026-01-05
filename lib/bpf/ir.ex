@@ -1,21 +1,8 @@
 defmodule BPF.IR do
-  @moduledoc """
-  Intermediate representation for BPF compilation.
-
-  The IR sits between Elixir AST parsing and BPF instruction generation.
-  It provides a structured representation of binary patterns and guards
-  that can be easily compiled to BPF instructions.
-  """
+  @moduledoc false
 
   defmodule Segment do
-    @moduledoc """
-    A segment in a binary pattern.
-
-    Represents a single element in a binary match expression like:
-    - `4::4` - a literal value
-    - `flags::8` - a binding
-    - `_::binary` - a skip/ignore
-    """
+    @moduledoc false
 
     defstruct [
       :type,
@@ -89,9 +76,7 @@ defmodule BPF.IR do
   end
 
   defmodule Pattern do
-    @moduledoc """
-    A binary pattern consisting of multiple segments.
-    """
+    @moduledoc false
 
     defstruct [:segments]
 
@@ -117,11 +102,7 @@ defmodule BPF.IR do
   end
 
   defmodule Guard do
-    @moduledoc """
-    Guard expression tree.
-
-    Represents guard conditions that can be compiled to BPF jump instructions.
-    """
+    @moduledoc false
 
     @type comparison :: :eq | :neq | :lt | :gt | :lte | :gte
     @type logical :: :and | :or | :not
@@ -165,11 +146,7 @@ defmodule BPF.IR do
   end
 
   defmodule Clause do
-    @moduledoc """
-    A single clause in the pattern matching function.
-
-    Combines a pattern, optional guard, and the action to take on match.
-    """
+    @moduledoc false
 
     defstruct [:pattern, :guard, :action]
 

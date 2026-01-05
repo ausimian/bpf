@@ -1,10 +1,5 @@
 defmodule BPF.Compiler.CodeGen do
-  @moduledoc """
-  Code generation from SSA to BPF instructions.
-
-  Takes SSA operations with register allocation and emits BPF instructions.
-  Tracks the current contents of the A register to avoid redundant loads.
-  """
+  @moduledoc false
 
   @accept_value 0xFFFFFFFF
   @reject_value 0

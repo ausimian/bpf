@@ -284,6 +284,7 @@ defmodule BPF.Parser do
   defp do_parse_guard({:band, _, [left, right]}), do: parse_bitwise(:band, left, right)
   defp do_parse_guard({:bor, _, [left, right]}), do: parse_bitwise(:bor, left, right)
   defp do_parse_guard({:bxor, _, [left, right]}), do: parse_bitwise(:bxor, left, right)
+
   defp do_parse_guard({:bnot, _, [expr]}) do
     with {:ok, e} <- parse_operand(expr) do
       {:ok, Guard.bitwise(:bnot, e, nil)}
@@ -431,9 +432,15 @@ defmodule BPF.Parser do
   defp parse_action(expr) do
     # Try to parse as an expression (may contain bindings)
     case parse_operand(expr) do
-      {:ok, {:literal, n}} when n > 0 -> {:ok, {:accept, n}}
-      {:ok, {:literal, 0}} -> {:ok, :reject}
-      {:ok, operand} -> {:ok, {:return_expr, operand}}
+      {:ok, {:literal, n}} when n > 0 ->
+        {:ok, {:accept, n}}
+
+      {:ok, {:literal, 0}} ->
+        {:ok, :reject}
+
+      {:ok, operand} ->
+        {:ok, {:return_expr, operand}}
+
       {:error, _} ->
         # Try parsing as a guard condition (comparison expression)
         case parse_guard(expr) do

@@ -108,7 +108,10 @@ defmodule BPFTest do
     test "TCP SYN packet filter" do
       # Accept TCP packets with SYN flag (bit 1) set
       # Assuming TCP flags at offset 33 in the packet
-      prog = bpf(fn <<_::binary-size(33), flags::8, _::binary>> when band(flags, 0x02) != 0 -> true end)
+      prog =
+        bpf(fn <<_::binary-size(33), flags::8, _::binary>> when band(flags, 0x02) != 0 ->
+          true
+        end)
 
       # SYN flag set
       syn_packet = :binary.copy(<<0>>, 33) <> <<0x02>>

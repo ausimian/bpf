@@ -11,10 +11,14 @@ defmodule BPF.Compiler.SSA do
   import Bitwise
 
   defstruct [
-    :ops,        # List of SSA operations
-    :next_vreg,  # Next virtual register ID
-    :bindings,   # Map of binding name to vreg
-    :fail_label  # Label to jump on clause failure
+    # List of SSA operations
+    :ops,
+    # Next virtual register ID
+    :next_vreg,
+    # Map of binding name to vreg
+    :bindings,
+    # Label to jump on clause failure
+    :fail_label
   ]
 
   # SSA Operations:

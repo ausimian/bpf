@@ -17,7 +17,8 @@ defmodule BPF.Compiler.CodeGen do
   def generate(ops, allocation) do
     state = %{
       allocation: allocation,
-      reg_a: nil,     # What's currently in A: nil, {:vreg, n}, {:imm, n}, :unknown
+      # What's currently in A: nil, {:vreg, n}, {:imm, n}, :unknown
+      reg_a: nil,
       instrs: []
     }
 
@@ -41,14 +42,15 @@ defmodule BPF.Compiler.CodeGen do
     state = if mask, do: emit(state, {:and, mask}), else: state
 
     # Store to scratch if allocated there
-    state = case alloc do
-      {:mem, slot} ->
-        state = emit(state, {:st, slot})
-        %{state | reg_a: {:vreg, vreg}}
+    state =
+      case alloc do
+        {:mem, slot} ->
+          state = emit(state, {:st, slot})
+          %{state | reg_a: {:vreg, vreg}}
 
-      :a ->
-        %{state | reg_a: {:vreg, vreg}}
-    end
+        :a ->
+          %{state | reg_a: {:vreg, vreg}}
+      end
 
     state
   end
@@ -72,21 +74,22 @@ defmodule BPF.Compiler.CodeGen do
   # ALU operation
   defp generate_op({:alu, vreg, op, src1, src2}, state) do
     # Apply operation with src2
-    state = case src2 do
-      {:imm, value} ->
-        # Simple case: src1 to A, immediate operation
-        state = load_to_a(src1, state)
-        emit(state, alu_op(op, value))
+    state =
+      case src2 do
+        {:imm, value} ->
+          # Simple case: src1 to A, immediate operation
+          state = load_to_a(src1, state)
+          emit(state, alu_op(op, value))
 
-      nil when op == :bnot ->
-        state = load_to_a(src1, state)
-        emit(state, {:xor, 0xFFFFFFFF})
+        nil when op == :bnot ->
+          state = load_to_a(src1, state)
+          emit(state, {:xor, 0xFFFFFFFF})
 
-      src2_vreg when is_integer(src2_vreg) ->
-        # Complex case: need both operands
-        # Strategy: put src2 in X, src1 in A, then operate
-        generate_alu_two_vregs(op, src1, src2_vreg, state)
-    end
+        src2_vreg when is_integer(src2_vreg) ->
+          # Complex case: need both operands
+          # Strategy: put src2 in X, src1 in A, then operate
+          generate_alu_two_vregs(op, src1, src2_vreg, state)
+      end
 
     # Store result if needed
     alloc = Map.get(state.allocation, vreg)
@@ -103,30 +106,27 @@ defmodule BPF.Compiler.CodeGen do
 
   # Comparison (jump on failure)
   defp generate_op({:cmp, op, left, right, fail_label}, state) do
-    # Ensure left is in A
-    state = load_to_a(left, state)
-
-    # Generate comparison
     case right do
       {:imm, value} ->
+        state = load_to_a(left, state)
         emit(state, cmp_jump(op, :k, value, fail_label))
 
       right_vreg when is_integer(right_vreg) ->
-        state = load_to_x(right_vreg, state)
+        # Need both operands in registers
+        state = load_cmp_operands(left, right_vreg, state)
         emit(state, cmp_jump(op, :x, 0, fail_label))
     end
   end
 
   # Comparison (jump on success - for OR branches)
   defp generate_op({:cmp_success, op, left, right, success_label}, state) do
-    state = load_to_a(left, state)
-
     case right do
       {:imm, value} ->
+        state = load_to_a(left, state)
         emit(state, cmp_jump_success(op, :k, value, success_label))
 
       right_vreg when is_integer(right_vreg) ->
-        state = load_to_x(right_vreg, state)
+        state = load_cmp_operands(left, right_vreg, state)
         emit(state, cmp_jump_success(op, :x, 0, success_label))
     end
   end
@@ -202,6 +202,48 @@ defmodule BPF.Compiler.CodeGen do
     end
   end
 
+  # Load two operands for comparison: left -> A, right -> X
+  defp load_cmp_operands(left, right, state) do
+    left_alloc = Map.get(state.allocation, left)
+    right_alloc = Map.get(state.allocation, right)
+
+    cond do
+      # Both in memory
+      match?({:mem, _}, left_alloc) and match?({:mem, _}, right_alloc) ->
+        {:mem, left_slot} = left_alloc
+        {:mem, right_slot} = right_alloc
+        # Load right to X, then left to A
+        state = emit(state, {:ld, :mem, right_slot})
+        state = emit(state, :tax)
+        state = emit(state, {:ld, :mem, left_slot})
+        %{state | reg_a: {:vreg, left}}
+
+      # Left in memory, right ephemeral in A
+      match?({:mem, _}, left_alloc) and right_alloc == :a ->
+        {:mem, left_slot} = left_alloc
+        # Right should be in A - move to X, then load left
+        state = emit(state, :tax)
+        state = emit(state, {:ld, :mem, left_slot})
+        %{state | reg_a: {:vreg, left}}
+
+      # Left ephemeral in A, right in memory
+      left_alloc == :a and match?({:mem, _}, right_alloc) ->
+        {:mem, right_slot} = right_alloc
+        # Left is in A - save to temp, load right to A, move to X, restore left
+        state = emit(state, {:st, 15})
+        state = emit(state, {:ld, :mem, right_slot})
+        state = emit(state, :tax)
+        state = emit(state, {:ld, :mem, 15})
+        %{state | reg_a: {:vreg, left}}
+
+      # Both ephemeral (shouldn't happen with proper allocation)
+      true ->
+        state = load_to_a(left, state)
+        state = load_to_x(right, state)
+        state
+    end
+  end
+
   # Emit an instruction
   defp emit(state, instr) do
     %{state | instrs: [instr | state.instrs]}
@@ -255,10 +297,13 @@ defmodule BPF.Compiler.CodeGen do
         {:mem, slot2} = src2_alloc
         # This is tricky - src1 is ephemeral in A, we need to preserve it
         # Save A to temp, load src2 to A, move to X, restore A
-        state = emit(state, {:st, 15})  # Save src1 to temp
+        # Save src1 to temp
+        state = emit(state, {:st, 15})
         state = emit(state, {:ld, :mem, slot2})
-        state = emit(state, :tax)  # X = src2
-        state = emit(state, {:ld, :mem, 15})  # A = src1
+        # X = src2
+        state = emit(state, :tax)
+        # A = src1
+        state = emit(state, {:ld, :mem, 15})
         emit(state, alu_op_x(op))
 
       # Both ephemeral in A (shouldn't happen - only one can be in A)

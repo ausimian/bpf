@@ -38,8 +38,12 @@ defmodule BPF.Compiler.Liveness do
   """
   def overlaps?(analysis, vreg1, vreg2) do
     case {live_range(analysis, vreg1), live_range(analysis, vreg2)} do
-      {nil, _} -> false
-      {_, nil} -> false
+      {nil, _} ->
+        false
+
+      {_, nil} ->
+        false
+
       {{s1, e1}, {s2, e2}} ->
         # Ranges overlap if one starts before the other ends
         s1 <= e2 and s2 <= e1

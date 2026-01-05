@@ -37,12 +37,14 @@ defmodule BPF.ProgramTest do
     end
 
     test "returns correct count for multiple instructions" do
-      prog = Program.new([
-        {:ld, :b, [:k, 0]},
-        {:jmp, :jeq, :k, 5, 0, 1},
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :b, [:k, 0]},
+          {:jmp, :jeq, :k, 5, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert Program.length(prog) == 4
     end
 
@@ -79,8 +81,22 @@ defmodule BPF.ProgramTest do
       # First instruction: {:ld, :imm, 42} -> code=0x00, k=42
       # Second instruction: {:ret, :a} -> code=0x16
       assert <<
-               0x00, 0x00, 0x00, 0x00, 42, 0x00, 0x00, 0x00,
-               0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+               0x00,
+               0x00,
+               0x00,
+               0x00,
+               42,
+               0x00,
+               0x00,
+               0x00,
+               0x16,
+               0x00,
+               0x00,
+               0x00,
+               0x00,
+               0x00,
+               0x00,
+               0x00
              >> = bytes
     end
 

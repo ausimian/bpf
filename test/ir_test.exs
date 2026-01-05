@@ -76,6 +76,7 @@ defmodule BPF.IRTest do
         Segment.literal(4, 4, 0),
         Segment.binding(:ihl, 4, 4)
       ]
+
       pattern = Pattern.new(segments)
       assert pattern.segments == segments
     end
@@ -93,6 +94,7 @@ defmodule BPF.IRTest do
         Segment.binding(:ihl, 4, 4),
         Segment.binding(:tos, 8, 8)
       ]
+
       pattern = Pattern.new(segments)
       bindings = Pattern.bindings(pattern)
 
@@ -107,6 +109,7 @@ defmodule BPF.IRTest do
         Segment.literal(4, 4, 0),
         Segment.skip(4, 4)
       ]
+
       pattern = Pattern.new(segments)
       assert Pattern.bindings(pattern) == %{}
     end
@@ -117,6 +120,7 @@ defmodule BPF.IRTest do
         Segment.binding(:b, 8, 8),
         Segment.binding(:c, 8, 16)
       ]
+
       pattern = Pattern.new(segments)
       bindings = Pattern.bindings(pattern)
 
@@ -131,6 +135,7 @@ defmodule BPF.IRTest do
         Segment.binding(:ihl, 4, 4),
         Segment.literal(0, 8, 8)
       ]
+
       pattern = Pattern.new(segments)
       literals = Pattern.literals(pattern)
 

@@ -247,25 +247,61 @@ defmodule BPF.ParserTest do
     test "returns error for invalid action" do
       # Manually construct AST with invalid body
       # fn clauses are in the format: [{:->, _, [[pattern], body]}]
-      ast = {:fn, [], [{:->, [], [[{:<<>>, [], [{:"::", [], [{:_, [], nil}, 8]}]}], :invalid_action]}]}
+      ast =
+        {:fn, [],
+         [{:->, [], [[{:<<>>, [], [{:"::", [], [{:_, [], nil}, 8]}]}], :invalid_action]}]}
+
       assert {:error, {:invalid_action, :invalid_action}} = Parser.parse(ast)
     end
 
     test "returns error for invalid guard expression" do
       # A guard with an unsupported operator
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:invalid_op, [], [{:x, [], nil}, 5]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [
+                   {:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]},
+                   {:invalid_op, [], [{:x, [], nil}, 5]}
+                 ]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:error, {:invalid_guard, _}} = Parser.parse(ast)
     end
 
     test "returns error for invalid operand in guard" do
       # A guard using a function call as operand
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [{:foo, [], [{:x, [], nil}]}, 5]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [
+                   {:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]},
+                   {:==, [], [{:foo, [], [{:x, [], nil}]}, 5]}
+                 ]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:error, {:invalid_operand, _}} = Parser.parse(ast)
     end
 
     test "returns error for variable size specification" do
       # <<x::n>> where n is a variable - not supported in BPF
-      ast = {:fn, [], [{:->, [], [[{:<<>>, [], [{:"::", [], [{:x, [], nil}, {:n, [], nil}]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [{:->, [], [[{:<<>>, [], [{:"::", [], [{:x, [], nil}, {:n, [], nil}]}]}], true]}]}
+
       assert {:error, {:variable_size_not_supported, :n}} = Parser.parse(ast)
     end
   end
@@ -369,24 +405,31 @@ defmodule BPF.ParserTest do
     test "parses subtraction in guard" do
       ast = quote do: fn <<x::8, y::8>> when x - y > 0 -> true end
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
-      assert {:compare, :gt, {:arith, :sub, {:binding, :x}, {:binding, :y}}, {:literal, 0}} = guard
+
+      assert {:compare, :gt, {:arith, :sub, {:binding, :x}, {:binding, :y}}, {:literal, 0}} =
+               guard
     end
 
     test "parses multiplication in guard" do
       ast = quote do: fn <<x::8>> when x * 2 > 100 -> true end
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
-      assert {:compare, :gt, {:arith, :mul, {:binding, :x}, {:literal, 2}}, {:literal, 100}} = guard
+
+      assert {:compare, :gt, {:arith, :mul, {:binding, :x}, {:literal, 2}}, {:literal, 100}} =
+               guard
     end
 
     test "parses division in guard" do
       ast = quote do: fn <<x::8>> when div(x, 2) > 10 -> true end
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
-      assert {:compare, :gt, {:arith, :div, {:binding, :x}, {:literal, 2}}, {:literal, 10}} = guard
+
+      assert {:compare, :gt, {:arith, :div, {:binding, :x}, {:literal, 2}}, {:literal, 10}} =
+               guard
     end
 
     test "parses bor in guard" do
       ast = quote do: fn <<x::8>> when bor(x, 0xF0) == 0xFF -> true end
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+
       assert {:compare, :eq, {:bitwise, :bor, {:binding, :x}, {:literal, 0xF0}}, {:literal, 0xFF}} =
                guard
     end
@@ -394,6 +437,7 @@ defmodule BPF.ParserTest do
     test "parses bxor in guard" do
       ast = quote do: fn <<x::8>> when bxor(x, 0xFF) == 0 -> true end
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+
       assert {:compare, :eq, {:bitwise, :bxor, {:binding, :x}, {:literal, 0xFF}}, {:literal, 0}} =
                guard
     end
@@ -454,13 +498,21 @@ defmodule BPF.ParserTest do
 
     test "returns error for invalid size spec" do
       # Using a list as size spec which is invalid
-      ast = {:fn, [], [{:->, [], [[{:<<>>, [], [{:"::", [], [{:x, [], nil}, [1, 2, 3]]}]}], true]}]}
+      ast =
+        {:fn, [], [{:->, [], [[{:<<>>, [], [{:"::", [], [{:x, [], nil}, [1, 2, 3]]}]}], true]}]}
+
       assert {:error, {:invalid_size_spec, [1, 2, 3]}} = Parser.parse(ast)
     end
 
     test "returns error for invalid modifier" do
       # Using an unknown modifier like 'foo'
-      ast = {:fn, [], [{:->, [], [[{:<<>>, [], [{:"::", [], [{:x, [], nil}, {:-, [], [8, {:foo, [], nil}]}]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [[{:<<>>, [], [{:"::", [], [{:x, [], nil}, {:-, [], [8, {:foo, [], nil}]}]}]}], true]}
+         ]}
+
       assert {:error, {:invalid_modifier, {:foo, [], nil}}} = Parser.parse(ast)
     end
   end
@@ -469,31 +521,89 @@ defmodule BPF.ParserTest do
     test "parses Bitwise.band in guard" do
       # Bitwise.band(x, 0x0F)
       band_call = {{:., [], [{:__aliases__, [], [:Bitwise]}, :band]}, [], [{:x, [], nil}, 0x0F]}
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [band_call, 0x0F]}]}], true]}]}
+
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [band_call, 0x0F]}]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
-      assert {:compare, :eq, {:bitwise, :band, {:binding, :x}, {:literal, 15}}, {:literal, 15}} = guard
+
+      assert {:compare, :eq, {:bitwise, :band, {:binding, :x}, {:literal, 15}}, {:literal, 15}} =
+               guard
     end
 
     test "parses Bitwise.bor in guard" do
       # Bitwise.bor(x, 0x80)
       bor_call = {{:., [], [{:__aliases__, [], [:Bitwise]}, :bor]}, [], [{:x, [], nil}, 0x80]}
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [bor_call, 0x80]}]}], true]}]}
+
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [bor_call, 0x80]}]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
-      assert {:compare, :eq, {:bitwise, :bor, {:binding, :x}, {:literal, 128}}, {:literal, 128}} = guard
+
+      assert {:compare, :eq, {:bitwise, :bor, {:binding, :x}, {:literal, 128}}, {:literal, 128}} =
+               guard
     end
 
     test "parses Bitwise.bxor in guard" do
       # Bitwise.bxor(x, 0xFF)
       bxor_call = {{:., [], [{:__aliases__, [], [:Bitwise]}, :bxor]}, [], [{:x, [], nil}, 0xFF]}
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [bxor_call, 0]}]}], true]}]}
+
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [bxor_call, 0]}]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
-      assert {:compare, :eq, {:bitwise, :bxor, {:binding, :x}, {:literal, 255}}, {:literal, 0}} = guard
+
+      assert {:compare, :eq, {:bitwise, :bxor, {:binding, :x}, {:literal, 255}}, {:literal, 0}} =
+               guard
     end
 
     test "parses Bitwise.bnot in guard" do
       # Bitwise.bnot(x)
       bnot_call = {{:., [], [{:__aliases__, [], [:Bitwise]}, :bnot]}, [], [{:x, [], nil}]}
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [bnot_call, 0]}]}], true]}]}
+
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:==, [], [bnot_call, 0]}]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
       assert {:compare, :eq, {:bitwise, :bnot, {:binding, :x}, nil}, {:literal, 0}} = guard
     end
@@ -502,25 +612,82 @@ defmodule BPF.ParserTest do
   describe "parse/1 imported bitwise as guards (top-level)" do
     test "parses band as top-level guard (checking truthiness)" do
       # when band(x, 0x80) - this is band as a guard expression, not inside comparison
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:band, [], [{:x, [], nil}, 0x80]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [
+                   {:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]},
+                   {:band, [], [{:x, [], nil}, 0x80]}
+                 ]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
       assert {:bitwise, :band, {:binding, :x}, {:literal, 128}} = guard
     end
 
     test "parses bor as top-level guard" do
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:bor, [], [{:x, [], nil}, 0x80]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [
+                   {:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]},
+                   {:bor, [], [{:x, [], nil}, 0x80]}
+                 ]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
       assert {:bitwise, :bor, {:binding, :x}, {:literal, 128}} = guard
     end
 
     test "parses bxor as top-level guard" do
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:bxor, [], [{:x, [], nil}, 0xFF]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [
+                   {:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]},
+                   {:bxor, [], [{:x, [], nil}, 0xFF]}
+                 ]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
       assert {:bitwise, :bxor, {:binding, :x}, {:literal, 255}} = guard
     end
 
     test "parses bnot as top-level guard" do
-      ast = {:fn, [], [{:->, [], [[{:when, [], [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:bnot, [], [{:x, [], nil}]}]}], true]}]}
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:when, [],
+                 [{:<<>>, [], [{:"::", [], [{:x, [], nil}, 8]}]}, {:bnot, [], [{:x, [], nil}]}]}
+              ],
+              true
+            ]}
+         ]}
+
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
       assert {:bitwise, :bnot, {:binding, :x}, nil} = guard
     end
@@ -594,7 +761,8 @@ defmodule BPF.ParserTest do
       ast = quote do: fn <<x::8>> when x + (1 + 2) == 10 -> true end
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
       # (1 + 2) should be folded to 3, but x + 3 cannot be folded
-      assert {:compare, :eq, {:arith, :add, {:binding, :x}, {:literal, 3}}, {:literal, 10}} = guard
+      assert {:compare, :eq, {:arith, :add, {:binding, :x}, {:literal, 3}}, {:literal, 10}} =
+               guard
     end
 
     test "folds complex nested expression" do

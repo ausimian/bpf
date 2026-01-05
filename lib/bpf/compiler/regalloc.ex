@@ -13,7 +13,6 @@ defmodule BPF.Compiler.RegAlloc do
   3. Slots are reused when live ranges don't overlap
   """
 
-
   @max_scratch_slots 16
 
   @doc """
@@ -25,14 +24,16 @@ defmodule BPF.Compiler.RegAlloc do
   """
   def allocate(ops, liveness) do
     # Sort vregs by definition order
-    vregs = liveness
-    |> Enum.sort_by(fn {_vreg, info} -> info.def end)
-    |> Enum.map(fn {vreg, _} -> vreg end)
+    vregs =
+      liveness
+      |> Enum.sort_by(fn {_vreg, info} -> info.def end)
+      |> Enum.map(fn {vreg, _} -> vreg end)
 
     # Track which slots are free at each point
     state = %{
       allocation: %{},
-      active: [],           # {vreg, slot, end_idx} sorted by end
+      # {vreg, slot, end_idx} sorted by end
+      active: [],
       free_slots: Enum.to_list(0..(@max_scratch_slots - 1))
     }
 
@@ -55,28 +56,31 @@ defmodule BPF.Compiler.RegAlloc do
     # Determine if this vreg needs a scratch slot
     allocation = determine_allocation(vreg, ops, liveness, state)
 
-    state = case allocation do
-      :a ->
-        # No scratch slot needed
-        %{state | allocation: Map.put(state.allocation, vreg, :a)}
+    state =
+      case allocation do
+        :a ->
+          # No scratch slot needed
+          %{state | allocation: Map.put(state.allocation, vreg, :a)}
 
-      :need_slot ->
-        # Allocate a scratch slot
-        case state.free_slots do
-          [slot | rest_slots] ->
-            active = insert_active(state.active, {vreg, slot, last_use})
-            %{state |
-              allocation: Map.put(state.allocation, vreg, {:mem, slot}),
-              active: active,
-              free_slots: rest_slots
-            }
+        :need_slot ->
+          # Allocate a scratch slot
+          case state.free_slots do
+            [slot | rest_slots] ->
+              active = insert_active(state.active, {vreg, slot, last_use})
 
-          [] ->
-            # No free slots - spill (shouldn't happen with <= 16 live values)
-            # For now, raise an error
-            raise "Out of scratch slots"
-        end
-    end
+              %{
+                state
+                | allocation: Map.put(state.allocation, vreg, {:mem, slot}),
+                  active: active,
+                  free_slots: rest_slots
+              }
+
+            [] ->
+              # No free slots - spill (shouldn't happen with <= 16 live values)
+              # For now, raise an error
+              raise "Out of scratch slots"
+          end
+      end
 
     allocate_vregs(rest, ops, liveness, state)
   end
@@ -103,35 +107,37 @@ defmodule BPF.Compiler.RegAlloc do
   defp single_use?(info), do: length(info.uses) == 1
 
   # Check if a value can stay in A from definition to use
-  # This is true if no other loads happen between def and use
+  # This is true if no other operations that require A happen between def and use
   defp can_stay_in_a?(vreg, ops, liveness) do
     info = Map.get(liveness, vreg)
 
     # Get the ops between definition and use
     intervening = Enum.slice(ops, (info.def + 1)..(info.last_use - 1))
 
-    # Check if any of them define a new value (would clobber A)
-    not Enum.any?(intervening, &defines_value?/1)
+    # Check if any of them would clobber A (load/ALU) or use A for a different value
+    not Enum.any?(intervening, fn op -> clobbers_a?(op, vreg) end)
   end
 
-  defp defines_value?({:load_packet, _, _, _, _, _}), do: true
-  defp defines_value?({:load_imm, _, _}), do: true
-  defp defines_value?({:alu, _, _, _, _}), do: true
-  defp defines_value?(_), do: false
+  # Check if an operation clobbers the A register
+  defp clobbers_a?({:load_packet, _, _, _, _, _}, _vreg), do: true
+  defp clobbers_a?({:load_imm, _, _}, _vreg), do: true
+  defp clobbers_a?({:alu, _, _, _, _}, _vreg), do: true
+  # Comparisons need to load their left operand to A
+  defp clobbers_a?({:cmp, _, left, _, _}, vreg), do: left != vreg
+  defp clobbers_a?({:cmp_success, _, left, _, _}, vreg), do: left != vreg
+  defp clobbers_a?(_, _vreg), do: false
 
   # Expire active intervals that end before the current point
   defp expire_old(state, current_idx) do
-    {expired, still_active} = Enum.split_while(state.active, fn {_vreg, _slot, end_idx} ->
-      end_idx < current_idx
-    end)
+    {expired, still_active} =
+      Enum.split_while(state.active, fn {_vreg, _slot, end_idx} ->
+        end_idx < current_idx
+      end)
 
     # Free the slots from expired intervals
     freed_slots = Enum.map(expired, fn {_vreg, slot, _end} -> slot end)
 
-    %{state |
-      active: still_active,
-      free_slots: Enum.sort(freed_slots ++ state.free_slots)
-    }
+    %{state | active: still_active, free_slots: Enum.sort(freed_slots ++ state.free_slots)}
   end
 
   # Insert into active list, maintaining sort by end index

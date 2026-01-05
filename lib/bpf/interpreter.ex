@@ -134,15 +134,15 @@ defmodule BPF.Interpreter do
 
   # ALU operations with constant
   defp step({:add, k}, %{a: a} = state) when is_integer(k) do
-    {:continue, advance(%{state | a: (a + k) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a + k &&& 0xFFFFFFFF})}
   end
 
   defp step({:sub, k}, %{a: a} = state) when is_integer(k) do
-    {:continue, advance(%{state | a: (a - k) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a - k &&& 0xFFFFFFFF})}
   end
 
   defp step({:mul, k}, %{a: a} = state) when is_integer(k) do
-    {:continue, advance(%{state | a: (a * k) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a * k &&& 0xFFFFFFFF})}
   end
 
   defp step({:div, k}, _state) when is_integer(k) and k == 0 do
@@ -174,7 +174,7 @@ defmodule BPF.Interpreter do
   end
 
   defp step({:lsh, k}, %{a: a} = state) when is_integer(k) do
-    {:continue, advance(%{state | a: (a <<< k) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a <<< k &&& 0xFFFFFFFF})}
   end
 
   defp step({:rsh, k}, %{a: a} = state) when is_integer(k) do
@@ -183,15 +183,15 @@ defmodule BPF.Interpreter do
 
   # ALU operations with X register
   defp step({:add, :x}, %{a: a, x: x} = state) do
-    {:continue, advance(%{state | a: (a + x) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a + x &&& 0xFFFFFFFF})}
   end
 
   defp step({:sub, :x}, %{a: a, x: x} = state) do
-    {:continue, advance(%{state | a: (a - x) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a - x &&& 0xFFFFFFFF})}
   end
 
   defp step({:mul, :x}, %{a: a, x: x} = state) do
-    {:continue, advance(%{state | a: (a * x) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a * x &&& 0xFFFFFFFF})}
   end
 
   defp step({:div, :x}, %{x: 0}) do
@@ -223,7 +223,7 @@ defmodule BPF.Interpreter do
   end
 
   defp step({:lsh, :x}, %{a: a, x: x} = state) do
-    {:continue, advance(%{state | a: (a <<< x) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: a <<< x &&& 0xFFFFFFFF})}
   end
 
   defp step({:rsh, :x}, %{a: a, x: x} = state) do
@@ -232,7 +232,7 @@ defmodule BPF.Interpreter do
 
   # Negation - A = -A
   defp step(:neg, %{a: a} = state) do
-    {:continue, advance(%{state | a: (-a) &&& 0xFFFFFFFF})}
+    {:continue, advance(%{state | a: -a &&& 0xFFFFFFFF})}
   end
 
   # Unconditional jump

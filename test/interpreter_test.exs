@@ -34,33 +34,39 @@ defmodule BPF.InterpreterTest do
 
     test "ld :mem loads from scratch memory" do
       # Store 99 in M[0], then load it back
-      prog = Program.new([
-        {:ld, :imm, 99},
-        {:st, 0},
-        {:ld, :imm, 0},
-        {:ld, :mem, 0},
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 99},
+          {:st, 0},
+          {:ld, :imm, 0},
+          {:ld, :mem, 0},
+          {:ret, :a}
+        ])
+
       assert {:ok, 99} = Interpreter.run(prog, <<>>)
     end
 
     test "ld with indirect addressing [:x, k]" do
       # X = 2, load byte at X + 1 = 3
-      prog = Program.new([
-        {:ldx, :imm, 2},
-        {:ld, :b, [:x, 1]},
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ldx, :imm, 2},
+          {:ld, :b, [:x, 1]},
+          {:ret, :a}
+        ])
+
       assert {:ok, 0xDD} = Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
     end
 
     test "ldx :msh loads IP header length" do
       # IHL field (lower 4 bits) * 4
-      prog = Program.new([
-        {:ldx, :msh, 0},
-        :txa,
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ldx, :msh, 0},
+          :txa,
+          {:ret, :a}
+        ])
+
       # 0x45 & 0x0F = 5, * 4 = 20
       assert {:ok, 20} = Interpreter.run(prog, <<0x45, 0x00>>)
     end
@@ -158,34 +164,48 @@ defmodule BPF.InterpreterTest do
 
   describe "jump instructions" do
     test "ja (unconditional jump)" do
-      prog = Program.new([
-        {:jmp, :ja, 1},       # Skip next instruction
-        {:ld, :imm, 999},     # This should be skipped
-        {:ld, :imm, 42},
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          # Skip next instruction
+          {:jmp, :ja, 1},
+          # This should be skipped
+          {:ld, :imm, 999},
+          {:ld, :imm, 42},
+          {:ret, :a}
+        ])
+
       assert {:ok, 42} = Interpreter.run(prog, <<>>)
     end
 
     test "jeq with constant - true branch" do
-      prog = Program.new([
-        {:ld, :imm, 5},
-        {:jmp, :jeq, :k, 5, 1, 0},  # if A == 5, skip 1, else skip 0
-        {:ld, :imm, 0},              # false branch
-        {:ld, :imm, 100},            # true branch
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 5},
+          # if A == 5, skip 1, else skip 0
+          {:jmp, :jeq, :k, 5, 1, 0},
+          # false branch
+          {:ld, :imm, 0},
+          # true branch
+          {:ld, :imm, 100},
+          {:ret, :a}
+        ])
+
       assert {:ok, 100} = Interpreter.run(prog, <<>>)
     end
 
     test "jeq with constant - false branch" do
-      prog = Program.new([
-        {:ld, :imm, 3},
-        {:jmp, :jeq, :k, 5, 1, 0},  # if A == 5, skip 1, else skip 0
-        {:ld, :imm, 0},              # false branch (taken)
-        {:ld, :imm, 100},            # true branch (skipped)
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 3},
+          # if A == 5, skip 1, else skip 0
+          {:jmp, :jeq, :k, 5, 1, 0},
+          # false branch (taken)
+          {:ld, :imm, 0},
+          # true branch (skipped)
+          {:ld, :imm, 100},
+          {:ret, :a}
+        ])
+
       # Falls through false branch, then loads 100, returns 100
       # Wait, let me trace through:
       # PC=0: ld imm 3 -> A=3, PC=1
@@ -199,77 +219,101 @@ defmodule BPF.InterpreterTest do
 
     test "jeq with constant - proper branching" do
       # Accept if A == 5, reject otherwise
-      prog = Program.new([
-        {:ld, :imm, 5},
-        {:jmp, :jeq, :k, 5, 0, 1},  # if A == 5, skip 0 (next), else skip 1
-        {:ret, :k, 0xFFFFFFFF},      # accept (true)
-        {:ret, :k, 0}                # reject (false)
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 5},
+          # if A == 5, skip 0 (next), else skip 1
+          {:jmp, :jeq, :k, 5, 0, 1},
+          # accept (true)
+          {:ret, :k, 0xFFFFFFFF},
+          # reject (false)
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<>>)
 
-      prog = Program.new([
-        {:ld, :imm, 3},
-        {:jmp, :jeq, :k, 5, 0, 1},
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 3},
+          {:jmp, :jeq, :k, 5, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0} = Interpreter.run(prog, <<>>)
     end
 
     test "jgt with constant" do
-      prog = Program.new([
-        {:ld, :imm, 10},
-        {:jmp, :jgt, :k, 5, 0, 1},  # if A > 5, accept
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 10},
+          # if A > 5, accept
+          {:jmp, :jgt, :k, 5, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<>>)
 
-      prog = Program.new([
-        {:ld, :imm, 5},
-        {:jmp, :jgt, :k, 5, 0, 1},  # 5 > 5 is false
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 5},
+          # 5 > 5 is false
+          {:jmp, :jgt, :k, 5, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0} = Interpreter.run(prog, <<>>)
     end
 
     test "jge with constant" do
-      prog = Program.new([
-        {:ld, :imm, 5},
-        {:jmp, :jge, :k, 5, 0, 1},  # if A >= 5, accept
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 5},
+          # if A >= 5, accept
+          {:jmp, :jge, :k, 5, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<>>)
     end
 
     test "jset (bitwise AND test)" do
-      prog = Program.new([
-        {:ld, :imm, 0b1010},
-        {:jmp, :jset, :k, 0b0010, 0, 1},  # if A & 2 != 0, accept
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0b1010},
+          # if A & 2 != 0, accept
+          {:jmp, :jset, :k, 0b0010, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<>>)
 
-      prog = Program.new([
-        {:ld, :imm, 0b1010},
-        {:jmp, :jset, :k, 0b0100, 0, 1},  # if A & 4 != 0, accept
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0b1010},
+          # if A & 4 != 0, accept
+          {:jmp, :jset, :k, 0b0100, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0} = Interpreter.run(prog, <<>>)
     end
 
     test "jeq with X register" do
-      prog = Program.new([
-        {:ld, :imm, 42},
-        {:ldx, :imm, 42},
-        {:jmp, :jeq, :x, 0, 1},
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 42},
+          {:ldx, :imm, 42},
+          {:jmp, :jeq, :x, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<>>)
     end
   end
@@ -288,48 +332,58 @@ defmodule BPF.InterpreterTest do
 
   describe "misc instructions" do
     test "tax copies A to X" do
-      prog = Program.new([
-        {:ld, :imm, 42},
-        :tax,
-        {:ld, :imm, 0},  # clear A
-        :txa,            # restore from X
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 42},
+          :tax,
+          # clear A
+          {:ld, :imm, 0},
+          # restore from X
+          :txa,
+          {:ret, :a}
+        ])
+
       assert {:ok, 42} = Interpreter.run(prog, <<>>)
     end
 
     test "txa copies X to A" do
-      prog = Program.new([
-        {:ldx, :imm, 99},
-        :txa,
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ldx, :imm, 99},
+          :txa,
+          {:ret, :a}
+        ])
+
       assert {:ok, 99} = Interpreter.run(prog, <<>>)
     end
   end
 
   describe "scratch memory" do
     test "st and ld :mem work together" do
-      prog = Program.new([
-        {:ld, :imm, 111},
-        {:st, 0},
-        {:ld, :imm, 222},
-        {:st, 1},
-        {:ld, :mem, 0},
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 111},
+          {:st, 0},
+          {:ld, :imm, 222},
+          {:st, 1},
+          {:ld, :mem, 0},
+          {:ret, :a}
+        ])
+
       assert {:ok, 111} = Interpreter.run(prog, <<>>)
     end
 
     test "stx and ldx :mem work together" do
-      prog = Program.new([
-        {:ldx, :imm, 333},
-        {:stx, 5},
-        {:ldx, :imm, 0},
-        {:ldx, :mem, 5},
-        :txa,
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ldx, :imm, 333},
+          {:stx, 5},
+          {:ldx, :imm, 0},
+          {:ldx, :mem, 5},
+          :txa,
+          {:ret, :a}
+        ])
+
       assert {:ok, 333} = Interpreter.run(prog, <<>>)
     end
   end
@@ -441,110 +495,134 @@ defmodule BPF.InterpreterTest do
 
     test "returns error for byte load past end" do
       prog = Program.new([{:ld, :b, [:k, 4]}, {:ret, :a}])
-      assert {:error, {:packet_too_short, 4, 1}} = Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
+
+      assert {:error, {:packet_too_short, 4, 1}} =
+               Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
     end
 
     test "returns error for halfword load past end" do
       prog = Program.new([{:ld, :h, [:k, 3]}, {:ret, :a}])
-      assert {:error, {:packet_too_short, 3, 2}} = Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
+
+      assert {:error, {:packet_too_short, 3, 2}} =
+               Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
     end
 
     test "returns error for word load past end" do
       prog = Program.new([{:ld, :w, [:k, 2]}, {:ret, :a}])
-      assert {:error, {:packet_too_short, 2, 4}} = Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
+
+      assert {:error, {:packet_too_short, 2, 4}} =
+               Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
     end
 
     test "indirect load respects bounds" do
       prog = Program.new([{:ldx, :imm, 3}, {:ld, :b, [:x, 1]}, {:ret, :a}])
-      assert {:error, {:packet_too_short, 4, 1}} = Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
+
+      assert {:error, {:packet_too_short, 4, 1}} =
+               Interpreter.run(prog, <<0xAA, 0xBB, 0xCC, 0xDD>>)
     end
   end
 
   describe "jump boundary tests" do
     test "jump to program end is valid" do
-      prog = Program.new([
-        {:jmp, :ja, 2},
-        {:ld, :imm, 100},
-        {:ret, :a},
-        {:ld, :imm, 200},
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:jmp, :ja, 2},
+          {:ld, :imm, 100},
+          {:ret, :a},
+          {:ld, :imm, 200},
+          {:ret, :a}
+        ])
+
       assert {:ok, 200} = Interpreter.run(prog, <<>>)
     end
 
     test "conditional jump with max jt offset" do
-      prog = Program.new([
-        {:ld, :imm, 5},
-        {:jmp, :jeq, :k, 5, 2, 0},
-        {:ld, :imm, 0},
-        {:ret, :a},
-        {:ld, :imm, 100},
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 5},
+          {:jmp, :jeq, :k, 5, 2, 0},
+          {:ld, :imm, 0},
+          {:ret, :a},
+          {:ld, :imm, 100},
+          {:ret, :a}
+        ])
+
       assert {:ok, 100} = Interpreter.run(prog, <<>>)
     end
 
     test "jgt comparison at boundaries" do
       # Test A > 0xFFFFFFFE
-      prog = Program.new([
-        {:ld, :imm, 0xFFFFFFFF},
-        {:jmp, :jgt, :k, 0xFFFFFFFE, 0, 1},
-        {:ret, :k, 1},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0xFFFFFFFF},
+          {:jmp, :jgt, :k, 0xFFFFFFFE, 0, 1},
+          {:ret, :k, 1},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 1} = Interpreter.run(prog, <<>>)
     end
 
     test "jge comparison at boundaries" do
-      prog = Program.new([
-        {:ld, :imm, 0xFFFFFFFF},
-        {:jmp, :jge, :k, 0xFFFFFFFF, 0, 1},
-        {:ret, :k, 1},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0xFFFFFFFF},
+          {:jmp, :jge, :k, 0xFFFFFFFF, 0, 1},
+          {:ret, :k, 1},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 1} = Interpreter.run(prog, <<>>)
     end
 
     test "jset with full bitmask" do
-      prog = Program.new([
-        {:ld, :imm, 0xFFFFFFFF},
-        {:jmp, :jset, :k, 0xFFFFFFFF, 0, 1},
-        {:ret, :k, 1},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0xFFFFFFFF},
+          {:jmp, :jset, :k, 0xFFFFFFFF, 0, 1},
+          {:ret, :k, 1},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 1} = Interpreter.run(prog, <<>>)
     end
 
     test "jgt with X at boundary" do
-      prog = Program.new([
-        {:ld, :imm, 0xFFFFFFFF},
-        {:ldx, :imm, 0xFFFFFFFE},
-        {:jmp, :jgt, :x, 0, 1},
-        {:ret, :k, 1},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0xFFFFFFFF},
+          {:ldx, :imm, 0xFFFFFFFE},
+          {:jmp, :jgt, :x, 0, 1},
+          {:ret, :k, 1},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 1} = Interpreter.run(prog, <<>>)
     end
 
     test "jge with X at boundary" do
-      prog = Program.new([
-        {:ld, :imm, 100},
-        {:ldx, :imm, 100},
-        {:jmp, :jge, :x, 0, 1},
-        {:ret, :k, 1},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 100},
+          {:ldx, :imm, 100},
+          {:jmp, :jge, :x, 0, 1},
+          {:ret, :k, 1},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 1} = Interpreter.run(prog, <<>>)
     end
 
     test "jset with X register" do
-      prog = Program.new([
-        {:ld, :imm, 0b1010},
-        {:ldx, :imm, 0b1000},
-        {:jmp, :jset, :x, 0, 1},
-        {:ret, :k, 1},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0b1010},
+          {:ldx, :imm, 0b1000},
+          {:jmp, :jset, :x, 0, 1},
+          {:ret, :k, 1},
+          {:ret, :k, 0}
+        ])
+
       assert {:ok, 1} = Interpreter.run(prog, <<>>)
     end
   end
@@ -611,7 +689,9 @@ defmodule BPF.InterpreterTest do
   describe "error handling" do
     test "unknown instruction returns error" do
       prog = Program.new([{:unknown_op, :foo, :bar}])
-      assert {:error, {:unknown_instruction, {:unknown_op, :foo, :bar}}} = Interpreter.run(prog, <<>>)
+
+      assert {:error, {:unknown_instruction, {:unknown_op, :foo, :bar}}} =
+               Interpreter.run(prog, <<>>)
     end
 
     test "invalid instruction tuple returns error" do
@@ -622,12 +702,14 @@ defmodule BPF.InterpreterTest do
     test "negative offset in indirect addressing" do
       # X = -1 (which is 0xFFFFFFFF as unsigned), then load [:x, 0]
       # This would compute a very large offset, causing packet_too_short
-      prog = Program.new([
-        {:ld, :imm, 0xFFFFFFFF},
-        :tax,
-        {:ld, :b, [:x, 0]},
-        {:ret, :a}
-      ])
+      prog =
+        Program.new([
+          {:ld, :imm, 0xFFFFFFFF},
+          :tax,
+          {:ld, :b, [:x, 0]},
+          {:ret, :a}
+        ])
+
       # The offset would be 0xFFFFFFFF which is way past the packet
       assert {:error, {:packet_too_short, _, _}} = Interpreter.run(prog, <<0xFF>>)
     end
@@ -665,13 +747,14 @@ defmodule BPF.InterpreterTest do
   describe "realistic programs" do
     test "accept IPv4 packets only" do
       # Check if IP version (upper 4 bits of first byte) == 4
-      prog = Program.new([
-        {:ld, :b, [:k, 0]},
-        {:rsh, 4},
-        {:jmp, :jeq, :k, 4, 0, 1},
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          {:ld, :b, [:k, 0]},
+          {:rsh, 4},
+          {:jmp, :jeq, :k, 4, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
 
       # IPv4 packet (version = 4, IHL = 5 -> 0x45)
       assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<0x45, 0x00, 0x00, 0x14>>)
@@ -683,12 +766,15 @@ defmodule BPF.InterpreterTest do
     test "accept TCP packets with SYN flag set" do
       # Simplified: assume fixed IP header, check TCP flags at offset 33
       # SYN flag is bit 1 (0x02) in TCP flags byte
-      prog = Program.new([
-        {:ld, :b, [:k, 33]},           # Load TCP flags byte
-        {:jmp, :jset, :k, 0x02, 0, 1}, # If SYN bit set, accept
-        {:ret, :k, 0xFFFFFFFF},
-        {:ret, :k, 0}
-      ])
+      prog =
+        Program.new([
+          # Load TCP flags byte
+          {:ld, :b, [:k, 33]},
+          # If SYN bit set, accept
+          {:jmp, :jset, :k, 0x02, 0, 1},
+          {:ret, :k, 0xFFFFFFFF},
+          {:ret, :k, 0}
+        ])
 
       # Create a minimal packet with SYN flag at offset 33
       packet_with_syn = :binary.copy(<<0>>, 33) <> <<0x02>>
@@ -700,19 +786,26 @@ defmodule BPF.InterpreterTest do
 
     test "check IP header length and total length" do
       # Accept if IHL >= 5 AND total_length > 20
-      prog = Program.new([
-        # Check IHL >= 5
-        {:ld, :b, [:k, 0]},             # 0
-        {:and, 0x0F},                   # 1
-        {:jmp, :jge, :k, 5, 0, 3},      # 2: If IHL < 5, jump to reject (skip 3 to index 6)
+      prog =
+        Program.new([
+          # Check IHL >= 5
+          # 0
+          {:ld, :b, [:k, 0]},
+          # 1
+          {:and, 0x0F},
+          # 2: If IHL < 5, jump to reject (skip 3 to index 6)
+          {:jmp, :jge, :k, 5, 0, 3},
 
-        # Check total_length > 20
-        {:ld, :h, [:k, 2]},             # 3: Load total length (bytes 2-3)
-        {:jmp, :jgt, :k, 20, 0, 1},     # 4: If total_length <= 20, reject (skip 1 to index 6)
-
-        {:ret, :k, 0xFFFFFFFF},         # 5: Accept
-        {:ret, :k, 0}                   # 6: Reject
-      ])
+          # Check total_length > 20
+          # 3: Load total length (bytes 2-3)
+          {:ld, :h, [:k, 2]},
+          # 4: If total_length <= 20, reject (skip 1 to index 6)
+          {:jmp, :jgt, :k, 20, 0, 1},
+          # 5: Accept
+          {:ret, :k, 0xFFFFFFFF},
+          # 6: Reject
+          {:ret, :k, 0}
+        ])
 
       # Valid packet: IHL=5 (0x45), total_length=40
       valid = <<0x45, 0x00, 0x00, 0x28>>

@@ -10,10 +10,10 @@ defmodule BPF.Compiler.SSATest do
       ssa = SSA.from_clause(hd(clauses), :fail)
 
       assert [
-        {:load_packet, 0, :byte, 0, 0, nil},
-        {:cmp, :eq, 0, {:imm, 42}, :fail},
-        {:ret, :accept}
-      ] = ssa.ops
+               {:load_packet, 0, :byte, 0, 0, nil},
+               {:cmp, :eq, 0, {:imm, 42}, :fail},
+               {:ret, :accept}
+             ] = ssa.ops
     end
 
     test "sub-byte binding produces load with shift and mask" do
@@ -23,12 +23,14 @@ defmodule BPF.Compiler.SSATest do
 
       # Literal check for 4::4, then binding load for flags::4
       assert [
-        {:load_packet, 0, :byte, 0, 4, 15},  # version: shift 4, mask 0xF
-        {:cmp, :eq, 0, {:imm, 4}, :fail},
-        {:load_packet, 1, :byte, 0, 0, 15},  # flags: no shift, mask 0xF
-        {:cmp, :eq, 1, {:imm, 8}, :fail},
-        {:ret, :accept}
-      ] = ssa.ops
+               # version: shift 4, mask 0xF
+               {:load_packet, 0, :byte, 0, 4, 15},
+               {:cmp, :eq, 0, {:imm, 4}, :fail},
+               # flags: no shift, mask 0xF
+               {:load_packet, 1, :byte, 0, 0, 15},
+               {:cmp, :eq, 1, {:imm, 8}, :fail},
+               {:ret, :accept}
+             ] = ssa.ops
     end
 
     test "arithmetic produces ALU operation" do
@@ -37,12 +39,12 @@ defmodule BPF.Compiler.SSATest do
       ssa = SSA.from_clause(hd(clauses), :fail)
 
       assert [
-        {:load_packet, 0, :byte, 0, 0, nil},
-        {:load_packet, 1, :byte, 1, 0, nil},
-        {:alu, 2, :add, 0, 1},
-        {:cmp, :gt, 2, {:imm, 100}, :fail},
-        {:ret, :accept}
-      ] = ssa.ops
+               {:load_packet, 0, :byte, 0, 0, nil},
+               {:load_packet, 1, :byte, 1, 0, nil},
+               {:alu, 2, :add, 0, 1},
+               {:cmp, :gt, 2, {:imm, 100}, :fail},
+               {:ret, :accept}
+             ] = ssa.ops
     end
 
     test "unused bindings are not loaded" do
@@ -52,10 +54,10 @@ defmodule BPF.Compiler.SSATest do
 
       # Only x should be loaded, not y
       assert [
-        {:load_packet, 0, :byte, 0, 0, nil},
-        {:cmp, :eq, 0, {:imm, 42}, :fail},
-        {:ret, :accept}
-      ] = ssa.ops
+               {:load_packet, 0, :byte, 0, 0, nil},
+               {:cmp, :eq, 0, {:imm, 42}, :fail},
+               {:ret, :accept}
+             ] = ssa.ops
     end
   end
 
@@ -135,10 +137,10 @@ defmodule BPF.Compiler.SSATest do
       code = CodeGen.generate(ssa.ops, alloc)
 
       assert [
-        {:ld, :b, [:k, 0]},
-        {:jmp, :jeq, :k, 42, 0, {:label_ref, :fail}},
-        {:ret, :k, 0xFFFFFFFF}
-      ] = code
+               {:ld, :b, [:k, 0]},
+               {:jmp, :jeq, :k, 42, 0, {:label_ref, :fail}},
+               {:ret, :k, 0xFFFFFFFF}
+             ] = code
     end
 
     test "generates correct BPF for arithmetic" do
@@ -163,81 +165,63 @@ defmodule BPF.Compiler.SSATest do
     end
   end
 
-  describe "SSA compiler integration" do
+  describe "compiler integration" do
     test "produces correct results for simple comparison" do
       ast = quote do: fn <<x::8>> when x == 42 -> true end
       {:ok, clauses} = BPF.Parser.parse(ast)
+      {:ok, prog} = BPF.Compiler.compile(clauses)
 
-      {:ok, prog_legacy} = BPF.Compiler.compile(clauses)
-      {:ok, prog_ssa} = BPF.Compiler.compile(clauses, optimizer: :ssa)
-
-      packet_match = <<42>>
-      packet_nomatch = <<41>>
-
-      assert BPF.Interpreter.run(prog_legacy, packet_match) ==
-             BPF.Interpreter.run(prog_ssa, packet_match)
-
-      assert BPF.Interpreter.run(prog_legacy, packet_nomatch) ==
-             BPF.Interpreter.run(prog_ssa, packet_nomatch)
+      assert {:ok, 0xFFFFFFFF} = BPF.Interpreter.run(prog, <<42>>)
+      assert {:ok, 0} = BPF.Interpreter.run(prog, <<41>>)
     end
 
     test "produces correct results for AND condition" do
       ast = quote do: fn <<x::8>> when x > 5 and x < 100 -> true end
       {:ok, clauses} = BPF.Parser.parse(ast)
+      {:ok, prog} = BPF.Compiler.compile(clauses)
 
-      {:ok, prog_legacy} = BPF.Compiler.compile(clauses)
-      {:ok, prog_ssa} = BPF.Compiler.compile(clauses, optimizer: :ssa)
+      # Should reject: 1, 5, 100, 150
+      assert {:ok, 0} = BPF.Interpreter.run(prog, <<1>>)
+      assert {:ok, 0} = BPF.Interpreter.run(prog, <<5>>)
+      assert {:ok, 0} = BPF.Interpreter.run(prog, <<100>>)
+      assert {:ok, 0} = BPF.Interpreter.run(prog, <<150>>)
 
-      for val <- [1, 5, 6, 50, 99, 100, 150] do
-        packet = <<val>>
-        assert BPF.Interpreter.run(prog_legacy, packet) ==
-               BPF.Interpreter.run(prog_ssa, packet),
-               "Mismatch for value #{val}"
-      end
+      # Should accept: 6, 50, 99
+      assert {:ok, 0xFFFFFFFF} = BPF.Interpreter.run(prog, <<6>>)
+      assert {:ok, 0xFFFFFFFF} = BPF.Interpreter.run(prog, <<50>>)
+      assert {:ok, 0xFFFFFFFF} = BPF.Interpreter.run(prog, <<99>>)
     end
 
     test "produces correct results for arithmetic" do
       ast = quote do: fn <<x::8, y::8>> when x + y > 100 -> true end
       {:ok, clauses} = BPF.Parser.parse(ast)
+      {:ok, prog} = BPF.Compiler.compile(clauses)
 
-      {:ok, prog_legacy} = BPF.Compiler.compile(clauses)
-      {:ok, prog_ssa} = BPF.Compiler.compile(clauses, optimizer: :ssa)
+      # Should reject: 50+50=100 (not > 100), 10+10=20
+      assert {:ok, 0} = BPF.Interpreter.run(prog, <<50, 50>>)
+      assert {:ok, 0} = BPF.Interpreter.run(prog, <<10, 10>>)
 
-      test_cases = [
-        {50, 50, false},   # 100 not > 100
-        {50, 51, true},    # 101 > 100
-        {60, 50, true},    # 110 > 100
-        {10, 10, false}    # 20 not > 100
-      ]
-
-      for {x, y, _expected} <- test_cases do
-        packet = <<x, y>>
-        assert BPF.Interpreter.run(prog_legacy, packet) ==
-               BPF.Interpreter.run(prog_ssa, packet),
-               "Mismatch for (#{x}, #{y})"
-      end
+      # Should accept: 50+51=101, 60+50=110
+      assert {:ok, 0xFFFFFFFF} = BPF.Interpreter.run(prog, <<50, 51>>)
+      assert {:ok, 0xFFFFFFFF} = BPF.Interpreter.run(prog, <<60, 50>>)
     end
 
-    test "SSA produces fewer instructions for arithmetic" do
-      ast = quote do: fn <<x::8, y::8>> when x + y > 100 -> true end
-      {:ok, clauses} = BPF.Parser.parse(ast)
-
-      {:ok, prog_legacy} = BPF.Compiler.compile(clauses)
-      {:ok, prog_ssa} = BPF.Compiler.compile(clauses, optimizer: :ssa)
-
-      # SSA should produce fewer instructions
-      assert length(prog_ssa.instructions) < length(prog_legacy.instructions)
-    end
-
-    test "SSA produces fewer instructions for simple case" do
+    test "produces efficient code for simple case" do
       ast = quote do: fn <<x::8>> when x == 42 -> true end
       {:ok, clauses} = BPF.Parser.parse(ast)
+      {:ok, prog} = BPF.Compiler.compile(clauses)
 
-      {:ok, prog_legacy} = BPF.Compiler.compile(clauses)
-      {:ok, prog_ssa} = BPF.Compiler.compile(clauses, optimizer: :ssa)
+      # Should produce minimal instructions (load, compare, ret, ret)
+      assert length(prog.instructions) <= 5
+    end
 
-      # SSA should produce fewer instructions (no unnecessary store)
-      assert length(prog_ssa.instructions) <= length(prog_legacy.instructions)
+    test "produces efficient code for arithmetic" do
+      ast = quote do: fn <<x::8, y::8>> when x + y > 100 -> true end
+      {:ok, clauses} = BPF.Parser.parse(ast)
+      {:ok, prog} = BPF.Compiler.compile(clauses)
+
+      # Should produce reasonably efficient code
+      assert length(prog.instructions) <= 10
     end
   end
 end

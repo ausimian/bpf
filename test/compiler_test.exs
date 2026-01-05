@@ -614,13 +614,14 @@ defmodule BPF.CompilerTest do
 
   describe "compile/1 multiple clause ordering" do
     test "first matching clause wins" do
-      ast = quote do
-        fn
-          <<1::8, _::binary>> -> 100
-          <<_::8, 2::8, _::binary>> -> 200
-          <<_::binary>> -> 300
+      ast =
+        quote do
+          fn
+            <<1::8, _::binary>> -> 100
+            <<_::8, 2::8, _::binary>> -> 200
+            <<_::binary>> -> 300
+          end
         end
-      end
 
       {:ok, clauses} = Parser.parse(ast)
       {:ok, prog} = Compiler.compile(clauses)
@@ -634,13 +635,14 @@ defmodule BPF.CompilerTest do
     end
 
     test "later clause checked if earlier fails guard" do
-      ast = quote do
-        fn
-          <<x::8>> when x > 100 -> 1
-          <<x::8>> when x > 50 -> 2
-          <<_::8>> -> 3
+      ast =
+        quote do
+          fn
+            <<x::8>> when x > 100 -> 1
+            <<x::8>> when x > 50 -> 2
+            <<_::8>> -> 3
+          end
         end
-      end
 
       {:ok, clauses} = Parser.parse(ast)
       {:ok, prog} = Compiler.compile(clauses)
@@ -968,12 +970,17 @@ defmodule BPF.CompilerTest do
       # Verify there's no {:ld, :mem, 0} immediately after {:st, 0}
       # (i.e., the redundant load was eliminated)
       instrs = prog.instructions
-      st_indices = Enum.with_index(instrs) |> Enum.filter(fn {i, _} -> match?({:st, _}, i) end) |> Enum.map(&elem(&1, 1))
+
+      st_indices =
+        Enum.with_index(instrs)
+        |> Enum.filter(fn {i, _} -> match?({:st, _}, i) end)
+        |> Enum.map(&elem(&1, 1))
 
       for st_idx <- st_indices do
         next_instr = Enum.at(instrs, st_idx + 1)
         # The instruction after st should NOT be ld mem with the same slot
         {_, st_slot} = Enum.at(instrs, st_idx)
+
         refute match?({:ld, :mem, ^st_slot}, next_instr),
                "Found redundant {:ld, :mem, #{st_slot}} immediately after {:st, #{st_slot}}"
       end
@@ -998,9 +1005,12 @@ defmodule BPF.CompilerTest do
       {:ok, prog} = Compiler.compile(clauses)
 
       # Verify correctness: x + y > 10 AND x > 3
-      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<5, 10>>)  # 5+10=15>10, 5>3
-      assert {:ok, 0} = Interpreter.run(prog, <<3, 10>>)  # 3+10=13>10, but 3>3 is false
-      assert {:ok, 0} = Interpreter.run(prog, <<5, 2>>)   # 5+2=7, not >10
+      # 5+10=15>10, 5>3
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<5, 10>>)
+      # 3+10=13>10, but 3>3 is false
+      assert {:ok, 0} = Interpreter.run(prog, <<3, 10>>)
+      # 5+2=7, not >10
+      assert {:ok, 0} = Interpreter.run(prog, <<5, 2>>)
     end
   end
 end

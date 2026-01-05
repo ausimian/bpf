@@ -4,15 +4,12 @@ defmodule BPF do
 
   ## Example
 
-      # Create a BPF program from a pattern matching expression
-      prog = BPF.bpf(fn <<4::4, ihl::4, _::binary>> when ihl >= 5 -> true end)
-
-      # Run it against a packet
-      BPF.run(prog, <<0x45, 0x00, 0x00, 0x14>>)
-      # => {:ok, 0xFFFFFFFF}
-
-      # Convert to raw bytecode for kernel use
-      bytes = BPF.Program.to_bytes(prog)
+      iex> prog = BPF.compile(fn <<4::4, ihl::4, _::binary>> when ihl >= 5 -> true end)
+      iex> BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x14>>)
+      true
+      iex> bytes = BPF.assemble(prog)
+      iex> is_binary(bytes)
+      true
   """
 
   @doc """
@@ -24,14 +21,37 @@ defmodule BPF do
   ## Examples
 
       # Simple byte match
-      iex> prog = BPF.bpf(fn <<x::8>> when x == 42 -> true end)
-      iex> BPF.run(prog, <<42>>)
-      {:ok, 0xFFFFFFFF}
+      iex> prog = BPF.compile(fn <<x::8>> when x == 42 -> true end)
+      iex> BPF.interpret(prog, <<42>>)
+      true
 
       # IPv4 packet filter
-      iex> prog = BPF.bpf(fn <<4::4, ihl::4, _::binary>> when ihl >= 5 -> true end)
-      iex> BPF.run(prog, <<0x45, 0x00, 0x00, 0x28>>)
-      {:ok, 0xFFFFFFFF}
+      iex> prog = BPF.compile(fn <<4::4, ihl::4, _::binary>> when ihl >= 5 -> true end)
+      iex> BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x28>>)
+      true
+
+      # Multi-clause: accept IPv4 or IPv6 packets over 100 bytes
+      # IPv4: version=4, total length at bytes 2-3
+      # IPv6: version=6, payload length at bytes 4-5 (add 40 for header)
+      iex> prog = BPF.compile(fn
+      ...>   <<4::4, _ihl::4, _tos::8, len::16, _::binary>> when len > 100 -> true
+      ...>   <<6::4, _::28, len::16, _::binary>> when len + 40 > 100 -> true
+      ...> end)
+      iex> BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x96, 0x00>>)  # IPv4, length 150
+      true
+      iex> BPF.interpret(prog, <<0x60, 0x00, 0x00, 0x00, 0x00, 0x50>>)  # IPv6, payload 80
+      true
+      iex> BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x32, 0x00>>)  # IPv4, length 50
+      false
+
+      # Single clause with conditional return: accept IPv4 or IPv6 packets
+      iex> prog = BPF.compile(fn <<version::4, _::binary>> -> version == 4 or version == 6 end)
+      iex> BPF.interpret(prog, <<0x45, 0x00>>)  # IPv4
+      true
+      iex> BPF.interpret(prog, <<0x60, 0x00>>)  # IPv6
+      true
+      iex> BPF.interpret(prog, <<0x50, 0x00>>)  # version 5
+      false
 
   ## Supported Patterns
 
@@ -47,7 +67,7 @@ defmodule BPF do
   - Bitwise: `band/2`, `bor/2`, `bxor/2`
   - Arithmetic: `+`, `-`, `*`, `div/2`
   """
-  defmacro bpf(expr) do
+  defmacro compile(expr) do
     quote do
       case BPF.Parser.parse(unquote(Macro.escape(expr))) do
         {:ok, clauses} ->
@@ -61,21 +81,46 @@ defmodule BPF do
   end
 
   @doc """
-  Run a BPF program against a binary packet.
+  Interpret a BPF program against a binary packet.
 
-  Returns `{:ok, return_value}` on success, or `{:error, reason}` on failure.
-
-  ## Return Values
-
-  - `0xFFFFFFFF` - Accept (pattern matched, guards passed)
-  - `0` - Reject (no match)
-  - Other values - Custom return from function body
+  Returns `true` if the program accepts the packet (non-zero return value),
+  or `false` if it rejects (zero return value).
 
   ## Examples
 
-      iex> prog = BPF.bpf(fn <<x::8>> -> true end)
-      iex> BPF.run(prog, <<42>>)
-      {:ok, 0xFFFFFFFF}
+      iex> prog = BPF.compile(fn <<x::8>> when x == 42 -> true end)
+      iex> BPF.interpret(prog, <<42>>)
+      true
+
+      iex> prog = BPF.compile(fn <<x::8>> when x == 42 -> true end)
+      iex> BPF.interpret(prog, <<99>>)
+      false
   """
-  defdelegate run(program, packet), to: BPF.Interpreter
+  def interpret(program, packet) do
+    case BPF.Interpreter.run(program, packet) do
+      {:ok, 0} -> false
+      {:ok, _} -> true
+    end
+  end
+
+  @doc """
+  Assemble a BPF program into raw bytecode.
+
+  Returns a binary suitable for use with `SO_ATTACH_FILTER` or other
+  kernel interfaces that accept classic BPF bytecode.
+
+  Each instruction is encoded as 8 bytes in little-endian format:
+  - 2 bytes: opcode
+  - 1 byte: jt (jump if true offset)
+  - 1 byte: jf (jump if false offset)
+  - 4 bytes: k (immediate constant)
+
+  ## Examples
+
+      iex> prog = BPF.compile(fn <<x::8>> when x == 42 -> true end)
+      iex> bytes = BPF.assemble(prog)
+      iex> is_binary(bytes) and rem(byte_size(bytes), 8) == 0
+      true
+  """
+  defdelegate assemble(program), to: BPF.Program
 end

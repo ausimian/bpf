@@ -55,28 +55,28 @@ defmodule BPF.ProgramTest do
     end
   end
 
-  describe "to_bytes/1" do
+  describe "assemble/1" do
     test "returns empty binary for empty program" do
       prog = Program.new([])
-      assert Program.to_bytes(prog) == <<>>
+      assert Program.assemble(prog) == <<>>
     end
 
     test "returns 8 bytes per instruction" do
       prog = Program.new([{:ret, :k, 0}])
-      bytes = Program.to_bytes(prog)
+      bytes = Program.assemble(prog)
       assert byte_size(bytes) == 8
     end
 
     test "returns 16 bytes for two instructions" do
       prog = Program.new([{:ld, :imm, 42}, {:ret, :a}])
-      bytes = Program.to_bytes(prog)
+      bytes = Program.assemble(prog)
       assert byte_size(bytes) == 16
     end
 
     test "returns correctly formatted bytecode" do
       # Simple program: load immediate 42, return A
       prog = Program.new([{:ld, :imm, 42}, {:ret, :a}])
-      bytes = Program.to_bytes(prog)
+      bytes = Program.assemble(prog)
 
       # First instruction: {:ld, :imm, 42} -> code=0x00, k=42
       # Second instruction: {:ret, :a} -> code=0x16
@@ -103,7 +103,7 @@ defmodule BPF.ProgramTest do
     test "handles large programs" do
       instructions = for _ <- 1..256, do: {:ld, :imm, 0}
       prog = Program.new(instructions)
-      bytes = Program.to_bytes(prog)
+      bytes = Program.assemble(prog)
       assert byte_size(bytes) == 256 * 8
     end
 
@@ -111,7 +111,7 @@ defmodule BPF.ProgramTest do
       for n <- 1..20 do
         instructions = for _ <- 1..n, do: {:ld, :imm, 0}
         prog = Program.new(instructions)
-        bytes = Program.to_bytes(prog)
+        bytes = Program.assemble(prog)
         assert rem(byte_size(bytes), 8) == 0
       end
     end

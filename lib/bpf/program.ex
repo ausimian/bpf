@@ -27,7 +27,7 @@ defmodule BPF.Program do
 
   Returns a binary suitable for use with SO_ATTACH_FILTER.
   """
-  def to_bytes(%__MODULE__{instructions: instructions}) do
+  def assemble(%__MODULE__{instructions: instructions}) do
     instructions
     |> Enum.map(&BPF.Instruction.to_binary/1)
     |> IO.iodata_to_binary()

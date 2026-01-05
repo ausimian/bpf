@@ -525,4 +525,83 @@ defmodule BPF.ParserTest do
       assert {:bitwise, :bnot, {:binding, :x}, nil} = guard
     end
   end
+
+  describe "parse/1 constant folding" do
+    test "folds addition of two literals" do
+      ast = quote do: fn <<x::8>> when x == 1 + 2 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 1 + 2 should be folded to 3
+      assert {:compare, :eq, {:binding, :x}, {:literal, 3}} = guard
+    end
+
+    test "folds subtraction of two literals" do
+      ast = quote do: fn <<x::8>> when x == 10 - 3 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, 7}} = guard
+    end
+
+    test "folds multiplication of two literals" do
+      ast = quote do: fn <<x::8>> when x == 3 * 4 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, 12}} = guard
+    end
+
+    test "folds division of two literals" do
+      ast = quote do: fn <<x::8>> when x == div(10, 2) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, 5}} = guard
+    end
+
+    test "folds nested arithmetic" do
+      ast = quote do: fn <<x::8>> when x == (1 + 2) * 3 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # (1 + 2) * 3 = 3 * 3 = 9
+      assert {:compare, :eq, {:binding, :x}, {:literal, 9}} = guard
+    end
+
+    test "folds band of two literals" do
+      ast = quote do: fn <<x::8>> when x == band(0xFF, 0x0F) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, 15}} = guard
+    end
+
+    test "folds bor of two literals" do
+      ast = quote do: fn <<x::8>> when x == bor(0xF0, 0x0F) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, 255}} = guard
+    end
+
+    test "folds bxor of two literals" do
+      ast = quote do: fn <<x::8>> when x == bxor(0xFF, 0x0F) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, 240}} = guard
+    end
+
+    test "folds bnot of a literal" do
+      ast = quote do: fn <<x::8>> when x == bnot(0) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, -1}} = guard
+    end
+
+    test "does not fold when binding involved" do
+      ast = quote do: fn <<x::8>> when x + 1 == 5 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # x + 1 cannot be folded since x is a binding
+      assert {:compare, :eq, {:arith, :add, {:binding, :x}, {:literal, 1}}, {:literal, 5}} = guard
+    end
+
+    test "partially folds when possible" do
+      ast = quote do: fn <<x::8>> when x + (1 + 2) == 10 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # (1 + 2) should be folded to 3, but x + 3 cannot be folded
+      assert {:compare, :eq, {:arith, :add, {:binding, :x}, {:literal, 3}}, {:literal, 10}} = guard
+    end
+
+    test "folds complex nested expression" do
+      ast = quote do: fn <<x::8>> when x == band(bor(0xF0, 0x0F), 0x55) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # bor(0xF0, 0x0F) = 0xFF, band(0xFF, 0x55) = 0x55
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0x55}} = guard
+    end
+  end
 end

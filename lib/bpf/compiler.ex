@@ -17,13 +17,69 @@ defmodule BPF.Compiler do
   @doc """
   Compile a list of IR clauses into a BPF program.
 
+  ## Options
+
+  - `:optimizer` - The compilation strategy to use:
+    - `:legacy` (default) - Original compiler
+    - `:ssa` - SSA-based compiler with optimized register allocation
+
   ## Example
 
       iex> clauses = [%BPF.IR.Clause{...}]
       iex> BPF.Compiler.compile(clauses)
       {:ok, %BPF.Program{...}}
+
+      iex> BPF.Compiler.compile(clauses, optimizer: :ssa)
+      {:ok, %BPF.Program{...}}
   """
-  def compile(clauses) when is_list(clauses) do
+  def compile(clauses, opts \\ [])
+
+  def compile(clauses, opts) when is_list(clauses) do
+    optimizer = Keyword.get(opts, :optimizer, :legacy)
+
+    case optimizer do
+      :ssa -> compile_ssa(clauses)
+      :legacy -> compile_legacy(clauses)
+      _ -> compile_legacy(clauses)
+    end
+  end
+
+  # SSA-based compilation pipeline
+  defp compile_ssa(clauses) do
+    alias BPF.Compiler.{SSA, Liveness, RegAlloc, CodeGen}
+
+    # Compile each clause through SSA pipeline
+    {instructions, _label_counter} =
+      clauses
+      |> Enum.with_index()
+      |> Enum.reduce({[], 0}, fn {clause, idx}, {acc, counter} ->
+        fail_label = :"clause_#{idx}_fail"
+        _next_label = :"clause_#{idx + 1}"
+
+        ssa = SSA.from_clause(clause, fail_label)
+        liveness = Liveness.analyze(ssa.ops)
+        allocation = RegAlloc.allocate(ssa.ops, liveness)
+        code = CodeGen.generate(ssa.ops, allocation)
+
+        # Add clause label and fail label
+        clause_code = [{:label, :"clause_#{idx}"}] ++ code ++ [{:label, fail_label}]
+
+        {acc ++ clause_code, counter + 1}
+      end)
+
+    # Add final reject
+    instructions = instructions ++ [{:label, :final_reject}, {:ret, :k, @reject_value}]
+
+    # Resolve labels
+    resolved = resolve_labels(instructions)
+
+    bindings = collect_bindings(clauses)
+
+    {:ok, Program.new(resolved, bindings)}
+  end
+
+  # Legacy compilation pipeline
+  defp compile_legacy(clauses) do
     # Generate instructions with symbolic labels
     {instructions, _state} = compile_clauses(clauses, initial_state())
 
@@ -85,10 +141,15 @@ defmodule BPF.Compiler do
     # Compile literal checks
     {literal_instrs, state} = compile_literals(pattern, fail_label, state)
 
-    # Load bindings needed for guard into scratch memory
+    # Determine which bindings are needed (for guard and/or return expression)
+    guard_bindings = if guard, do: find_guard_bindings(guard), else: []
+    action_bindings = find_action_bindings(action)
+    all_needed_bindings = Enum.uniq(guard_bindings ++ action_bindings)
+
+    # Load all needed bindings into scratch memory
     {binding_instrs, state} =
-      if guard do
-        compile_bindings(pattern, guard, state)
+      if all_needed_bindings != [] do
+        compile_bindings_list(pattern, all_needed_bindings, state)
       else
         {[], state}
       end
@@ -101,13 +162,17 @@ defmodule BPF.Compiler do
         {[], state}
       end
 
-    # Generate accept instruction
-    accept_instr = compile_action(action)
+    # Generate return instruction(s)
+    {action_instrs, state} = compile_action(action, state)
 
-    instructions = literal_instrs ++ binding_instrs ++ guard_instrs ++ [accept_instr]
+    instructions = literal_instrs ++ binding_instrs ++ guard_instrs ++ action_instrs
 
     {instructions, state}
   end
+
+  defp find_action_bindings({:return_expr, expr}), do: find_bindings_in_expr(expr, MapSet.new()) |> MapSet.to_list()
+  defp find_action_bindings({:return_cond, guard}), do: find_bindings_in_expr(guard, MapSet.new()) |> MapSet.to_list()
+  defp find_action_bindings(_), do: []
 
   # Compile literal pattern checks
   defp compile_literals(pattern, fail_label, state) do
@@ -191,9 +256,8 @@ defmodule BPF.Compiler do
     {[], state}
   end
 
-  # Load bindings needed for guard evaluation into scratch memory
-  defp compile_bindings(pattern, guard, state) do
-    needed_bindings = find_guard_bindings(guard)
+  # Load a list of bindings into scratch memory
+  defp compile_bindings_list(pattern, needed_bindings, state) do
     bindings = Pattern.bindings(pattern)
 
     {instrs, state} =
@@ -565,9 +629,28 @@ defmodule BPF.Compiler do
   defp bitwise_to_alu_x(:bor), do: {:or, :x}
   defp bitwise_to_alu_x(:bxor), do: {:xor, :x}
 
-  defp compile_action(:accept), do: {:ret, :k, @accept_value}
-  defp compile_action(:reject), do: {:ret, :k, @reject_value}
-  defp compile_action({:accept, n}), do: {:ret, :k, n}
+  defp compile_action(:accept, state), do: {[{:ret, :k, @accept_value}], state}
+  defp compile_action(:reject, state), do: {[{:ret, :k, @reject_value}], state}
+  defp compile_action({:accept, n}, state), do: {[{:ret, :k, n}], state}
+
+  defp compile_action({:return_expr, expr}, state) do
+    # Load the expression into A, then return A
+    {load_instrs, state} = load_operand_to_a(expr, state)
+    {load_instrs ++ [{:ret, :a}], state}
+  end
+
+  defp compile_action({:return_cond, guard}, state) do
+    # Compile the guard condition - if true, accept; if false, reject
+    # The guard jump will go to reject_label on failure
+    {reject_label, state} = fresh_label(state, "cond_reject")
+    {guard_instrs, state} = compile_guard(guard, reject_label, state)
+    instrs = guard_instrs ++ [
+      {:ret, :k, @accept_value},
+      {:label, reject_label},
+      {:ret, :k, @reject_value}
+    ]
+    {instrs, state}
+  end
 
   defp fresh_label(state, prefix) do
     label = :"#{prefix}_#{state.label_counter}"

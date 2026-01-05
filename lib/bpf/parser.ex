@@ -320,28 +320,28 @@ defmodule BPF.Parser do
   defp parse_operand({:+, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.arith(:add, l, r)}
+      {:ok, fold_arith(:add, l, r)}
     end
   end
 
   defp parse_operand({:-, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.arith(:sub, l, r)}
+      {:ok, fold_arith(:sub, l, r)}
     end
   end
 
   defp parse_operand({:*, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.arith(:mul, l, r)}
+      {:ok, fold_arith(:mul, l, r)}
     end
   end
 
   defp parse_operand({:div, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.arith(:div, l, r)}
+      {:ok, fold_arith(:div, l, r)}
     end
   end
 
@@ -349,27 +349,27 @@ defmodule BPF.Parser do
   defp parse_operand({:band, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.bitwise(:band, l, r)}
+      {:ok, fold_bitwise(:band, l, r)}
     end
   end
 
   defp parse_operand({:bor, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.bitwise(:bor, l, r)}
+      {:ok, fold_bitwise(:bor, l, r)}
     end
   end
 
   defp parse_operand({:bxor, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.bitwise(:bxor, l, r)}
+      {:ok, fold_bitwise(:bxor, l, r)}
     end
   end
 
   defp parse_operand({:bnot, _, [expr]}) do
     with {:ok, e} <- parse_operand(expr) do
-      {:ok, Guard.bitwise(:bnot, e, nil)}
+      {:ok, fold_bitwise(:bnot, e, nil)}
     end
   end
 
@@ -377,33 +377,48 @@ defmodule BPF.Parser do
   defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.bitwise(:band, l, r)}
+      {:ok, fold_bitwise(:band, l, r)}
     end
   end
 
   defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.bitwise(:bor, l, r)}
+      {:ok, fold_bitwise(:bor, l, r)}
     end
   end
 
   defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]}) do
     with {:ok, l} <- parse_operand(left),
          {:ok, r} <- parse_operand(right) do
-      {:ok, Guard.bitwise(:bxor, l, r)}
+      {:ok, fold_bitwise(:bxor, l, r)}
     end
   end
 
   defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bnot]}, _, [expr]}) do
     with {:ok, e} <- parse_operand(expr) do
-      {:ok, Guard.bitwise(:bnot, e, nil)}
+      {:ok, fold_bitwise(:bnot, e, nil)}
     end
   end
 
   defp parse_operand(other) do
     {:error, {:invalid_operand, other}}
   end
+
+  # Constant folding for arithmetic operations
+  defp fold_arith(:add, {:literal, a}, {:literal, b}), do: Guard.literal(a + b)
+  defp fold_arith(:sub, {:literal, a}, {:literal, b}), do: Guard.literal(a - b)
+  defp fold_arith(:mul, {:literal, a}, {:literal, b}), do: Guard.literal(a * b)
+  defp fold_arith(:div, {:literal, a}, {:literal, b}) when b != 0, do: Guard.literal(div(a, b))
+  defp fold_arith(op, l, r), do: Guard.arith(op, l, r)
+
+  # Constant folding for bitwise operations
+  defp fold_bitwise(:band, {:literal, a}, {:literal, b}), do: Guard.literal(Bitwise.band(a, b))
+  defp fold_bitwise(:bor, {:literal, a}, {:literal, b}), do: Guard.literal(Bitwise.bor(a, b))
+  defp fold_bitwise(:bxor, {:literal, a}, {:literal, b}), do: Guard.literal(Bitwise.bxor(a, b))
+  defp fold_bitwise(:bnot, {:literal, a}, nil), do: Guard.literal(Bitwise.bnot(a))
+  defp fold_bitwise(:bnot, e, nil), do: Guard.bitwise(:bnot, e, nil)
+  defp fold_bitwise(op, l, r), do: Guard.bitwise(op, l, r)
 
   # Parse return action from function body
   defp parse_action(true), do: {:ok, :accept}
@@ -412,5 +427,19 @@ defmodule BPF.Parser do
   defp parse_action(:reject), do: {:ok, :reject}
   defp parse_action(n) when is_integer(n) and n > 0, do: {:ok, {:accept, n}}
   defp parse_action(0), do: {:ok, :reject}
-  defp parse_action(other), do: {:error, {:invalid_action, other}}
+
+  defp parse_action(expr) do
+    # Try to parse as an expression (may contain bindings)
+    case parse_operand(expr) do
+      {:ok, {:literal, n}} when n > 0 -> {:ok, {:accept, n}}
+      {:ok, {:literal, 0}} -> {:ok, :reject}
+      {:ok, operand} -> {:ok, {:return_expr, operand}}
+      {:error, _} ->
+        # Try parsing as a guard condition (comparison expression)
+        case parse_guard(expr) do
+          {:ok, guard} -> {:ok, {:return_cond, guard}}
+          {:error, _} -> {:error, {:invalid_action, expr}}
+        end
+    end
+  end
 end

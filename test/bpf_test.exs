@@ -57,7 +57,9 @@ defmodule BPFTest do
 
     test "compiles complex guard with AND" do
       prog =
-        compile(fn <<4::4, ihl::4, _::8, len::16, _::binary>> when ihl >= 5 and len > 20 -> true end)
+        compile(fn <<4::4, ihl::4, _::8, len::16, _::binary>> when ihl >= 5 and len > 20 ->
+          true
+        end)
 
       # Valid: version=4, IHL=5, len=40
       assert BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x28>>)

@@ -274,15 +274,24 @@ defmodule BPF.Parser do
   end
 
   # Bitwise operators (Elixir uses Bitwise module functions in guards)
-  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]}, packet_var) do
+  defp do_parse_guard(
+         {{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]},
+         packet_var
+       ) do
     parse_bitwise(:band, left, right, packet_var)
   end
 
-  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]}, packet_var) do
+  defp do_parse_guard(
+         {{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]},
+         packet_var
+       ) do
     parse_bitwise(:bor, left, right, packet_var)
   end
 
-  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]}, packet_var) do
+  defp do_parse_guard(
+         {{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]},
+         packet_var
+       ) do
     parse_bitwise(:bxor, left, right, packet_var)
   end
 
@@ -293,9 +302,14 @@ defmodule BPF.Parser do
   end
 
   # Also handle imported Bitwise functions (band/2, bor/2, etc.)
-  defp do_parse_guard({:band, _, [left, right]}, packet_var), do: parse_bitwise(:band, left, right, packet_var)
-  defp do_parse_guard({:bor, _, [left, right]}, packet_var), do: parse_bitwise(:bor, left, right, packet_var)
-  defp do_parse_guard({:bxor, _, [left, right]}, packet_var), do: parse_bitwise(:bxor, left, right, packet_var)
+  defp do_parse_guard({:band, _, [left, right]}, packet_var),
+    do: parse_bitwise(:band, left, right, packet_var)
+
+  defp do_parse_guard({:bor, _, [left, right]}, packet_var),
+    do: parse_bitwise(:bor, left, right, packet_var)
+
+  defp do_parse_guard({:bxor, _, [left, right]}, packet_var),
+    do: parse_bitwise(:bxor, left, right, packet_var)
 
   defp do_parse_guard({:bnot, _, [expr]}, packet_var) do
     with {:ok, e} <- parse_operand(expr, packet_var) do
@@ -327,7 +341,8 @@ defmodule BPF.Parser do
 
   # Handle byte_size(packet) when packet is the full packet variable
   defp parse_operand({:byte_size, _, [{var_name, _, context}]}, packet_var)
-       when is_atom(var_name) and is_atom(context) and var_name == packet_var and packet_var != nil do
+       when is_atom(var_name) and is_atom(context) and var_name == packet_var and
+              packet_var != nil do
     {:ok, :packet_len}
   end
 
@@ -393,21 +408,30 @@ defmodule BPF.Parser do
   end
 
   # Bitwise module qualified calls as operands (e.g., Bitwise.band(x, 0x0F))
-  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]}, packet_var) do
+  defp parse_operand(
+         {{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]},
+         packet_var
+       ) do
     with {:ok, l} <- parse_operand(left, packet_var),
          {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:band, l, r)}
     end
   end
 
-  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]}, packet_var) do
+  defp parse_operand(
+         {{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]},
+         packet_var
+       ) do
     with {:ok, l} <- parse_operand(left, packet_var),
          {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:bor, l, r)}
     end
   end
 
-  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]}, packet_var) do
+  defp parse_operand(
+         {{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]},
+         packet_var
+       ) do
     with {:ok, l} <- parse_operand(left, packet_var),
          {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:bxor, l, r)}

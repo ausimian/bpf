@@ -1052,7 +1052,9 @@ defmodule BPF.CompilerTest do
 
     test "byte_size(packet) works combined with pattern and guards" do
       # Check IP version and packet length
-      ast = quote do: fn <<4::4, _::4, _::binary>> = packet when byte_size(packet) >= 20 -> true end
+      ast =
+        quote do: fn <<4::4, _::4, _::binary>> = packet when byte_size(packet) >= 20 -> true end
+
       {:ok, clauses} = Parser.parse(ast)
       {:ok, prog} = Compiler.compile(clauses)
 
@@ -1100,10 +1102,10 @@ defmodule BPF.CompilerTest do
 
     test "byte_size(packet) works in complex boolean expressions" do
       ast =
-        quote do:
-                fn <<_::binary>> = packet when byte_size(packet) > 50 and byte_size(packet) < 1500 ->
-                  true
-                end
+        quote do: fn <<_::binary>> = packet
+                     when byte_size(packet) > 50 and byte_size(packet) < 1500 ->
+                true
+              end
 
       {:ok, clauses} = Parser.parse(ast)
       {:ok, prog} = Compiler.compile(clauses)

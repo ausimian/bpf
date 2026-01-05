@@ -1,5 +1,8 @@
 # BPF
 
+[![CI](https://github.com/ausimian/bpf/actions/workflows/ci.yml/badge.svg)](https://github.com/ausimian/bpf/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/ausimian/bpf/badge.svg?branch=main)](https://coveralls.io/github/ausimian/bpf?branch=main)
+
 > **Note:** This library is a work in progress and not yet suitable for production use.
 
 A library for compiling Elixir binary pattern matching expressions into classic BPF (Berkeley Packet Filter) bytecode.

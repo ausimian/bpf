@@ -1,15 +1,35 @@
 defmodule BPF do
   @moduledoc """
-  A library for compiling Elixir binary pattern matching expressions into BPF programs.
+  A library for compiling Elixir binary pattern matching expressions into classic BPF programs.
+
+  Compiling produces a `%BPF.Program{}` struct containing the BPF instructions
+  and variable bindings. The program can be interpreted against binary packets (for testing),
+  or assembled into raw BPF bytecode for use with sockets or libpcap.
 
   ## Example
 
       iex> prog = BPF.compile(fn <<4::4, ihl::4, _::binary>> when ihl >= 5 -> true end)
+      %BPF.Program{
+        instructions: [
+          {:ld, :b, [:k, 0]},
+          {:rsh, 4},
+          {:and, 15},
+          {:jmp, :jeq, :k, 4, 0, 4},
+          {:ld, :b, [:k, 0]},
+          {:and, 15},
+          {:jmp, :jge, :k, 5, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ret, :k, 0}
+        ],
+        bindings: %{ihl: 4}
+      }
       iex> BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x14>>)
       true
-      iex> bytes = BPF.assemble(prog)
-      iex> is_binary(bytes)
-      true
+      iex> BPF.assemble(prog)
+      <<48, 0, 0, 0, 0, 0, 0, 0, 116, 0, 0, 0, 4, 0, 0, 0, 84, 0, 0, 0, 15, 0, 0, 0,
+        21, 0, 0, 4, 4, 0, 0, 0, 48, 0, 0, 0, 0, 0, 0, 0, 84, 0, 0, 0, 15, 0, 0, 0,
+        53, 0, 0, 1, 5, 0, 0, 0, 6, 0, 0, 0, 255, 255, 255, 255, 6, 0, 0, 0, 0, 0, 0,
+        0>>
   """
 
   @doc """

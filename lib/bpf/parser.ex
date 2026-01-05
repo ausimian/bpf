@@ -406,18 +406,33 @@ defmodule BPF.Parser do
     {:error, {:invalid_operand, other}}
   end
 
-  # Constant folding for arithmetic operations
-  defp fold_arith(:add, {:literal, a}, {:literal, b}), do: Guard.literal(a + b)
-  defp fold_arith(:sub, {:literal, a}, {:literal, b}), do: Guard.literal(a - b)
-  defp fold_arith(:mul, {:literal, a}, {:literal, b}), do: Guard.literal(a * b)
-  defp fold_arith(:div, {:literal, a}, {:literal, b}) when b != 0, do: Guard.literal(div(a, b))
+  # BPF operates on 32-bit unsigned values
+  @u32_mask 0xFFFFFFFF
+
+  # Clamp a value to 32-bit unsigned range
+  defp clamp_u32(n), do: Bitwise.band(n, @u32_mask)
+
+  # Constant folding for arithmetic operations (with 32-bit clamping)
+  defp fold_arith(:add, {:literal, a}, {:literal, b}), do: Guard.literal(clamp_u32(a + b))
+  defp fold_arith(:sub, {:literal, a}, {:literal, b}), do: Guard.literal(clamp_u32(a - b))
+  defp fold_arith(:mul, {:literal, a}, {:literal, b}), do: Guard.literal(clamp_u32(a * b))
+
+  defp fold_arith(:div, {:literal, a}, {:literal, b}) when b != 0,
+    do: Guard.literal(clamp_u32(div(a, b)))
+
   defp fold_arith(op, l, r), do: Guard.arith(op, l, r)
 
-  # Constant folding for bitwise operations
-  defp fold_bitwise(:band, {:literal, a}, {:literal, b}), do: Guard.literal(Bitwise.band(a, b))
-  defp fold_bitwise(:bor, {:literal, a}, {:literal, b}), do: Guard.literal(Bitwise.bor(a, b))
-  defp fold_bitwise(:bxor, {:literal, a}, {:literal, b}), do: Guard.literal(Bitwise.bxor(a, b))
-  defp fold_bitwise(:bnot, {:literal, a}, nil), do: Guard.literal(Bitwise.bnot(a))
+  # Constant folding for bitwise operations (with 32-bit clamping)
+  defp fold_bitwise(:band, {:literal, a}, {:literal, b}),
+    do: Guard.literal(clamp_u32(Bitwise.band(a, b)))
+
+  defp fold_bitwise(:bor, {:literal, a}, {:literal, b}),
+    do: Guard.literal(clamp_u32(Bitwise.bor(a, b)))
+
+  defp fold_bitwise(:bxor, {:literal, a}, {:literal, b}),
+    do: Guard.literal(clamp_u32(Bitwise.bxor(a, b)))
+
+  defp fold_bitwise(:bnot, {:literal, a}, nil), do: Guard.literal(clamp_u32(Bitwise.bnot(a)))
   defp fold_bitwise(:bnot, e, nil), do: Guard.bitwise(:bnot, e, nil)
   defp fold_bitwise(op, l, r), do: Guard.bitwise(op, l, r)
 

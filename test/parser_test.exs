@@ -747,7 +747,8 @@ defmodule BPF.ParserTest do
     test "folds bnot of a literal" do
       ast = quote do: fn <<x::8>> when x == bnot(0) -> true end
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
-      assert {:compare, :eq, {:binding, :x}, {:literal, -1}} = guard
+      # bnot(0) = 0xFFFFFFFF (32-bit unsigned)
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0xFFFFFFFF}} = guard
     end
 
     test "does not fold when binding involved" do
@@ -770,6 +771,87 @@ defmodule BPF.ParserTest do
       assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
       # bor(0xF0, 0x0F) = 0xFF, band(0xFF, 0x55) = 0x55
       assert {:compare, :eq, {:binding, :x}, {:literal, 0x55}} = guard
+    end
+  end
+
+  describe "parse/1 constant folding 32-bit clamping" do
+    @max_u32 0xFFFFFFFF
+
+    test "clamps addition overflow to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == 0xFFFFFFFF + 1 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 0xFFFFFFFF + 1 should wrap to 0
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0}} = guard
+    end
+
+    test "clamps addition large overflow to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == 0xFFFFFFFF + 0xFFFFFFFF -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 0xFFFFFFFF + 0xFFFFFFFF = 0x1FFFFFFFE, clamped to 0xFFFFFFFE
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0xFFFFFFFE}} = guard
+    end
+
+    test "clamps subtraction underflow to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == 0 - 1 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 0 - 1 should wrap to 0xFFFFFFFF
+      assert {:compare, :eq, {:binding, :x}, {:literal, @max_u32}} = guard
+    end
+
+    test "clamps subtraction large underflow to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == 1 - 100 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 1 - 100 = -99, wrapped to 32-bit unsigned = 0xFFFFFF9D
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0xFFFFFF9D}} = guard
+    end
+
+    test "clamps multiplication overflow to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == 0x10000 * 0x10000 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 0x10000 * 0x10000 = 0x100000000, clamped to 0
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0}} = guard
+    end
+
+    test "clamps multiplication large values to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == 0xFFFF * 0xFFFF -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 0xFFFF * 0xFFFF = 0xFFFE0001, fits in 32 bits
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0xFFFE0001}} = guard
+    end
+
+    test "clamps bnot to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == bnot(0) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # bnot(0) in 32-bit should be 0xFFFFFFFF, not -1
+      assert {:compare, :eq, {:binding, :x}, {:literal, @max_u32}} = guard
+    end
+
+    test "clamps bnot of small value to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == bnot(1) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # bnot(1) in 32-bit should be 0xFFFFFFFE
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0xFFFFFFFE}} = guard
+    end
+
+    test "clamps bxor result to 32-bit" do
+      # This tests that bitwise ops stay in 32-bit range
+      ast = quote do: fn <<x::32>> when x == bxor(0, 0xFFFFFFFF) -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      assert {:compare, :eq, {:binding, :x}, {:literal, @max_u32}} = guard
+    end
+
+    test "clamps nested overflow expression" do
+      ast = quote do: fn <<x::32>> when x == (0xFFFFFFFF + 1) * 2 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 0xFFFFFFFF + 1 = 0 (wrapped), 0 * 2 = 0
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0}} = guard
+    end
+
+    test "clamps chained additions to 32-bit" do
+      ast = quote do: fn <<x::32>> when x == 0x80000000 + 0x80000000 -> true end
+      assert {:ok, [%Clause{guard: guard}]} = Parser.parse(ast)
+      # 0x80000000 + 0x80000000 = 0x100000000, wrapped to 0
+      assert {:compare, :eq, {:binding, :x}, {:literal, 0}} = guard
     end
   end
 end

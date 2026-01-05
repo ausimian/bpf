@@ -18,6 +18,7 @@ defmodule BPF.Compiler.SSA do
 
   # SSA Operations:
   # {:load_packet, vreg, size, byte_offset, bit_shift, mask}  - Load from packet with optional shift/mask
+  # {:load_len, vreg}                                         - Load packet length
   # {:load_imm, vreg, value}                                  - Load immediate value
   # {:alu, vreg, op, src1, src2}                              - ALU operation (src2 can be vreg or {:imm, n})
   # {:cmp, op, left, right, fail_label}                       - Compare and jump to fail_label if false
@@ -65,6 +66,7 @@ defmodule BPF.Compiler.SSA do
 
   defp find_bindings_in_expr({:binding, name}), do: MapSet.new([name])
   defp find_bindings_in_expr({:literal, _}), do: MapSet.new()
+  defp find_bindings_in_expr(:packet_len), do: MapSet.new()
 
   defp find_bindings_in_expr({:compare, _, left, right}) do
     MapSet.union(find_bindings_in_expr(left), find_bindings_in_expr(right))
@@ -257,6 +259,12 @@ defmodule BPF.Compiler.SSA do
     {vreg, state}
   end
 
+  defp compile_operand(:packet_len, state) do
+    {vreg, state} = fresh_vreg(state)
+    state = emit(state, {:load_len, vreg})
+    {vreg, state}
+  end
+
   defp compile_operand({:arith, op, left, right}, state) do
     {left_vreg, state} = compile_operand(left, state)
     {right_src, state} = compile_operand_src(right, state)
@@ -286,6 +294,11 @@ defmodule BPF.Compiler.SSA do
   # Compile operand to either {:imm, value} or vreg (for RHS of operations)
   defp compile_operand_src({:literal, value}, state) do
     {{:imm, value}, state}
+  end
+
+  # packet_len needs to be loaded into a vreg
+  defp compile_operand_src(:packet_len, state) do
+    compile_operand(:packet_len, state)
   end
 
   defp compile_operand_src(other, state) do

@@ -108,6 +108,7 @@ defmodule BPF.Compiler.RegAlloc do
 
   # Check if an operation clobbers the A register
   defp clobbers_a?({:load_packet, _, _, _, _, _}, _vreg), do: true
+  defp clobbers_a?({:load_len, _}, _vreg), do: true
   defp clobbers_a?({:load_imm, _, _}, _vreg), do: true
   defp clobbers_a?({:alu, _, _, _, _}, _vreg), do: true
   # Comparisons need to load their left operand to A

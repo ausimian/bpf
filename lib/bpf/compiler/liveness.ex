@@ -64,6 +64,10 @@ defmodule BPF.Compiler.Liveness do
     update_vreg(acc, vreg, :def, idx)
   end
 
+  defp record_def(acc, {:load_len, vreg}, idx) do
+    update_vreg(acc, vreg, :def, idx)
+  end
+
   defp record_def(acc, {:alu, vreg, _op, _src1, _src2}, idx) do
     update_vreg(acc, vreg, :def, idx)
   end

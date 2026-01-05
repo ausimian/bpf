@@ -112,6 +112,7 @@ defmodule BPF.IR do
     @type operand ::
             {:binding, atom()}
             | {:literal, integer()}
+            | :packet_len
             | t()
 
     @type t ::
@@ -143,6 +144,9 @@ defmodule BPF.IR do
 
     @doc "A literal value"
     def literal(value), do: {:literal, value}
+
+    @doc "The packet length"
+    def packet_len, do: :packet_len
   end
 
   defmodule Clause do

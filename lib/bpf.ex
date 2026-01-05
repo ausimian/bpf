@@ -20,13 +20,34 @@ defmodule BPF do
 
   ## Examples
 
-      # Simple byte match
-      iex> prog = BPF.compile(fn <<x::8>> when x == 42 -> true end)
-      iex> BPF.interpret(prog, <<42>>)
-      true
+      # Simple byte match - returns a BPF.Program struct
+      iex> BPF.compile(fn <<x::8>> when x == 42 -> true end)
+      %BPF.Program{
+        instructions: [
+          {:ld, :b, [:k, 0]},
+          {:jmp, :jeq, :k, 42, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ret, :k, 0}
+        ],
+        bindings: %{x: 0}
+      }
 
       # IPv4 packet filter
       iex> prog = BPF.compile(fn <<4::4, ihl::4, _::binary>> when ihl >= 5 -> true end)
+      %BPF.Program{
+        instructions: [
+          {:ld, :b, [:k, 0]},
+          {:rsh, 4},
+          {:and, 15},
+          {:jmp, :jeq, :k, 4, 0, 4},
+          {:ld, :b, [:k, 0]},
+          {:and, 15},
+          {:jmp, :jge, :k, 5, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ret, :k, 0}
+        ],
+        bindings: %{ihl: 4}
+      }
       iex> BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x28>>)
       true
 
@@ -37,6 +58,27 @@ defmodule BPF do
       ...>   <<4::4, _ihl::4, _tos::8, len::16, _::binary>> when len > 100 -> true
       ...>   <<6::4, _::28, len::16, _::binary>> when len + 40 > 100 -> true
       ...> end)
+      %BPF.Program{
+        instructions: [
+          {:ld, :b, [:k, 0]},
+          {:rsh, 4},
+          {:and, 15},
+          {:jmp, :jeq, :k, 4, 0, 3},
+          {:ld, :h, [:k, 2]},
+          {:jmp, :jgt, :k, 100, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ld, :b, [:k, 0]},
+          {:rsh, 4},
+          {:and, 15},
+          {:jmp, :jeq, :k, 6, 0, 4},
+          {:ld, :h, [:k, 4]},
+          {:add, 40},
+          {:jmp, :jgt, :k, 100, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ret, :k, 0}
+        ],
+        bindings: %{len: 32, _ihl: 4, _tos: 8}
+      }
       iex> BPF.interpret(prog, <<0x45, 0x00, 0x00, 0x96, 0x00>>)  # IPv4, length 150
       true
       iex> BPF.interpret(prog, <<0x60, 0x00, 0x00, 0x00, 0x00, 0x50>>)  # IPv6, payload 80
@@ -46,11 +88,62 @@ defmodule BPF do
 
       # Single clause with conditional return: accept IPv4 or IPv6 packets
       iex> prog = BPF.compile(fn <<version::4, _::binary>> -> version == 4 or version == 6 end)
+      %BPF.Program{
+        instructions: [
+          {:ld, :b, [:k, 0]},
+          {:rsh, 4},
+          {:and, 15},
+          {:st, 0},
+          {:jmp, :jeq, :k, 4, 1, 0},
+          {:jmp, :jeq, :k, 6, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ret, :k, 0},
+          {:ret, :k, 0}
+        ],
+        bindings: %{version: 0}
+      }
       iex> BPF.interpret(prog, <<0x45, 0x00>>)  # IPv4
       true
       iex> BPF.interpret(prog, <<0x60, 0x00>>)  # IPv6
       true
       iex> BPF.interpret(prog, <<0x50, 0x00>>)  # version 5
+      false
+
+      # Filter by packet length using byte_size/1
+      # The packet variable must be bound with = to use byte_size
+      iex> prog = BPF.compile(fn <<_::binary>> = packet when byte_size(packet) >= 64 -> true end)
+      %BPF.Program{
+        instructions: [
+          {:ld, :len},
+          {:jmp, :jge, :k, 64, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ret, :k, 0}
+        ],
+        bindings: %{}
+      }
+      iex> BPF.interpret(prog, :binary.copy(<<0>>, 64))
+      true
+      iex> BPF.interpret(prog, :binary.copy(<<0>>, 63))
+      false
+
+      # Combine pattern matching with packet length check
+      iex> prog = BPF.compile(fn <<4::4, _::4, _::binary>> = pkt when byte_size(pkt) >= 20 -> true end)
+      %BPF.Program{
+        instructions: [
+          {:ld, :b, [:k, 0]},
+          {:rsh, 4},
+          {:and, 15},
+          {:jmp, :jeq, :k, 4, 0, 3},
+          {:ld, :len},
+          {:jmp, :jge, :k, 20, 0, 1},
+          {:ret, :k, 4294967295},
+          {:ret, :k, 0}
+        ],
+        bindings: %{}
+      }
+      iex> BPF.interpret(prog, <<0x45>> <> :binary.copy(<<0>>, 19))  # IPv4, 20 bytes
+      true
+      iex> BPF.interpret(prog, <<0x45, 0x00>>)  # IPv4, but too short
       false
 
   ## Supported Patterns
@@ -66,6 +159,7 @@ defmodule BPF do
   - Logical: `and`, `or`
   - Bitwise: `band/2`, `bor/2`, `bxor/2`
   - Arithmetic: `+`, `-`, `*`, `div/2`
+  - Packet length: `byte_size(packet)` when `packet` is bound with `= packet`
   """
   defmacro compile(expr) do
     quote do

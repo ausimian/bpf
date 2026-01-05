@@ -1013,4 +1013,113 @@ defmodule BPF.CompilerTest do
       assert {:ok, 0} = Interpreter.run(prog, <<5, 2>>)
     end
   end
+
+  describe "byte_size(packet) support" do
+    test "byte_size(packet) compiles to packet length instruction" do
+      # Using = packet to bind the full packet
+      ast = quote do: fn <<_::binary>> = packet when byte_size(packet) > 100 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      # Verify it uses {:ld, :len}
+      assert Enum.any?(prog.instructions, fn i -> i == {:ld, :len} end)
+
+      # Verify correctness
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, :binary.copy(<<0>>, 101))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 100))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 50))
+    end
+
+    test "byte_size(packet) works with equality comparison" do
+      ast = quote do: fn <<_::binary>> = packet when byte_size(packet) == 64 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, :binary.copy(<<0>>, 64))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 63))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 65))
+    end
+
+    test "byte_size(packet) works with less than comparison" do
+      ast = quote do: fn <<_::binary>> = packet when byte_size(packet) < 50 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, :binary.copy(<<0>>, 49))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 50))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 100))
+    end
+
+    test "byte_size(packet) works combined with pattern and guards" do
+      # Check IP version and packet length
+      ast = quote do: fn <<4::4, _::4, _::binary>> = packet when byte_size(packet) >= 20 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      # IPv4 header (version 4), 20+ bytes
+      ipv4_header = <<0x45>> <> :binary.copy(<<0>>, 19)
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, ipv4_header)
+
+      # IPv4 but too short
+      assert {:ok, 0} = Interpreter.run(prog, <<0x45, 0x00>>)
+
+      # Long enough but wrong version
+      assert {:ok, 0} = Interpreter.run(prog, <<0x60>> <> :binary.copy(<<0>>, 19))
+    end
+
+    test "byte_size(packet) works with reverse binding syntax" do
+      # packet = <<_::binary>> (reverse order)
+      ast = quote do: fn packet = <<_::binary>> when byte_size(packet) > 10 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, :binary.copy(<<0>>, 11))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 10))
+    end
+
+    test "byte_size on non-packet variable is not recognized as packet_len" do
+      # byte_size(other_var) should NOT be treated as packet length
+      # Since 'other' is not the packet variable bound with =, this should fail to parse
+      # or be treated as a regular binding
+      ast = quote do: fn <<x::8, _::binary>> = packet when byte_size(x) > 0 -> true end
+      result = Parser.parse(ast)
+      # x is not a binary, so byte_size(x) won't match the packet_len pattern
+      # It will be treated as a binding reference, which should error
+      assert {:error, _} = result
+    end
+
+    test "byte_size(packet) works in arithmetic expressions" do
+      ast = quote do: fn <<_::binary>> = packet when byte_size(packet) - 14 > 100 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      # Need packet size > 114 (100 + 14)
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, :binary.copy(<<0>>, 115))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 114))
+    end
+
+    test "byte_size(packet) works in complex boolean expressions" do
+      ast =
+        quote do:
+                fn <<_::binary>> = packet when byte_size(packet) > 50 and byte_size(packet) < 1500 ->
+                  true
+                end
+
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, :binary.copy(<<0>>, 100))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 50))
+      assert {:ok, 0} = Interpreter.run(prog, :binary.copy(<<0>>, 1500))
+    end
+
+    test "without packet binding, byte_size of undefined var fails" do
+      # Without = packet, byte_size(packet) refers to undefined binding
+      ast = quote do: fn <<_::binary>> when byte_size(packet) > 0 -> true end
+      # This should fail during parsing because 'packet' is not the packet variable
+      # and byte_size of a non-packet variable is not supported
+      result = Parser.parse(ast)
+      assert {:error, {:invalid_operand, _}} = result
+    end
+  end
 end

@@ -37,18 +37,37 @@ defmodule BPF.Parser do
 
   # Parse a single clause: {:->, meta, [[pattern_or_when], body]}
   defp parse_clause({:->, _, [[{:when, _, [pattern, guard]}], body]}) do
-    with {:ok, parsed_pattern} <- parse_pattern(pattern),
-         {:ok, parsed_guard} <- parse_guard(guard),
-         {:ok, action} <- parse_action(body) do
+    {actual_pattern, packet_var} = extract_packet_var(pattern)
+
+    with {:ok, parsed_pattern} <- parse_pattern(actual_pattern),
+         {:ok, parsed_guard} <- parse_guard(guard, packet_var),
+         {:ok, action} <- parse_action(body, packet_var) do
       {:ok, Clause.new(parsed_pattern, parsed_guard, action)}
     end
   end
 
   defp parse_clause({:->, _, [[pattern], body]}) do
-    with {:ok, parsed_pattern} <- parse_pattern(pattern),
-         {:ok, action} <- parse_action(body) do
+    {actual_pattern, packet_var} = extract_packet_var(pattern)
+
+    with {:ok, parsed_pattern} <- parse_pattern(actual_pattern),
+         {:ok, action} <- parse_action(body, packet_var) do
       {:ok, Clause.new(parsed_pattern, nil, action)}
     end
+  end
+
+  # Extract packet variable from pattern like `<<...>> = packet`
+  defp extract_packet_var({:=, _, [{:<<>>, _, _} = binary_pattern, {var_name, _, context}]})
+       when is_atom(var_name) and is_atom(context) do
+    {binary_pattern, var_name}
+  end
+
+  defp extract_packet_var({:=, _, [{var_name, _, context}, {:<<>>, _, _} = binary_pattern]})
+       when is_atom(var_name) and is_atom(context) do
+    {binary_pattern, var_name}
+  end
+
+  defp extract_packet_var(pattern) do
+    {pattern, nil}
   end
 
   # Parse a binary pattern: {:<<>>, meta, segments}
@@ -186,216 +205,222 @@ defmodule BPF.Parser do
   defp parse_modifier(other), do: {:error, {:invalid_modifier, other}}
 
   # Parse guard expressions
-  defp parse_guard(ast) do
-    do_parse_guard(ast)
+  defp parse_guard(ast, packet_var) do
+    do_parse_guard(ast, packet_var)
   end
 
   # Comparison operators
-  defp do_parse_guard({:==, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp do_parse_guard({:==, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, Guard.compare(:eq, l, r)}
     end
   end
 
-  defp do_parse_guard({:!=, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp do_parse_guard({:!=, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, Guard.compare(:neq, l, r)}
     end
   end
 
-  defp do_parse_guard({:<, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp do_parse_guard({:<, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, Guard.compare(:lt, l, r)}
     end
   end
 
-  defp do_parse_guard({:>, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp do_parse_guard({:>, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, Guard.compare(:gt, l, r)}
     end
   end
 
-  defp do_parse_guard({:<=, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp do_parse_guard({:<=, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, Guard.compare(:lte, l, r)}
     end
   end
 
-  defp do_parse_guard({:>=, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp do_parse_guard({:>=, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, Guard.compare(:gte, l, r)}
     end
   end
 
   # Logical operators
-  defp do_parse_guard({:and, _, [left, right]}) do
-    with {:ok, l} <- do_parse_guard(left),
-         {:ok, r} <- do_parse_guard(right) do
+  defp do_parse_guard({:and, _, [left, right]}, packet_var) do
+    with {:ok, l} <- do_parse_guard(left, packet_var),
+         {:ok, r} <- do_parse_guard(right, packet_var) do
       {:ok, Guard.logical_and(l, r)}
     end
   end
 
-  defp do_parse_guard({:or, _, [left, right]}) do
-    with {:ok, l} <- do_parse_guard(left),
-         {:ok, r} <- do_parse_guard(right) do
+  defp do_parse_guard({:or, _, [left, right]}, packet_var) do
+    with {:ok, l} <- do_parse_guard(left, packet_var),
+         {:ok, r} <- do_parse_guard(right, packet_var) do
       {:ok, Guard.logical_or(l, r)}
     end
   end
 
-  defp do_parse_guard({:not, _, [expr]}) do
-    with {:ok, e} <- do_parse_guard(expr) do
+  defp do_parse_guard({:not, _, [expr]}, packet_var) do
+    with {:ok, e} <- do_parse_guard(expr, packet_var) do
       {:ok, Guard.logical_not(e)}
     end
   end
 
   # Bitwise operators (Elixir uses Bitwise module functions in guards)
-  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]}) do
-    parse_bitwise(:band, left, right)
+  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]}, packet_var) do
+    parse_bitwise(:band, left, right, packet_var)
   end
 
-  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]}) do
-    parse_bitwise(:bor, left, right)
+  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]}, packet_var) do
+    parse_bitwise(:bor, left, right, packet_var)
   end
 
-  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]}) do
-    parse_bitwise(:bxor, left, right)
+  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]}, packet_var) do
+    parse_bitwise(:bxor, left, right, packet_var)
   end
 
-  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bnot]}, _, [expr]}) do
-    with {:ok, e} <- parse_operand(expr) do
+  defp do_parse_guard({{:., _, [{:__aliases__, _, [:Bitwise]}, :bnot]}, _, [expr]}, packet_var) do
+    with {:ok, e} <- parse_operand(expr, packet_var) do
       {:ok, Guard.bitwise(:bnot, e, nil)}
     end
   end
 
   # Also handle imported Bitwise functions (band/2, bor/2, etc.)
-  defp do_parse_guard({:band, _, [left, right]}), do: parse_bitwise(:band, left, right)
-  defp do_parse_guard({:bor, _, [left, right]}), do: parse_bitwise(:bor, left, right)
-  defp do_parse_guard({:bxor, _, [left, right]}), do: parse_bitwise(:bxor, left, right)
+  defp do_parse_guard({:band, _, [left, right]}, packet_var), do: parse_bitwise(:band, left, right, packet_var)
+  defp do_parse_guard({:bor, _, [left, right]}, packet_var), do: parse_bitwise(:bor, left, right, packet_var)
+  defp do_parse_guard({:bxor, _, [left, right]}, packet_var), do: parse_bitwise(:bxor, left, right, packet_var)
 
-  defp do_parse_guard({:bnot, _, [expr]}) do
-    with {:ok, e} <- parse_operand(expr) do
+  defp do_parse_guard({:bnot, _, [expr]}, packet_var) do
+    with {:ok, e} <- parse_operand(expr, packet_var) do
       {:ok, Guard.bitwise(:bnot, e, nil)}
     end
   end
 
   # Arithmetic operators when used in guards (nested in comparisons)
-  defp do_parse_guard(other) do
+  defp do_parse_guard(other, _packet_var) do
     {:error, {:invalid_guard, other}}
   end
 
-  defp parse_bitwise(op, left, right) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_bitwise(op, left, right, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, Guard.bitwise(op, l, r)}
     end
   end
 
   # Parse an operand (can be a binding, literal, or expression)
-  defp parse_operand(value) when is_integer(value) do
+  defp parse_operand(value, _packet_var) when is_integer(value) do
     {:ok, Guard.literal(value)}
   end
 
   # Handle unary minus for negative literals
-  defp parse_operand({:-, _, [value]}) when is_integer(value) do
+  defp parse_operand({:-, _, [value]}, _packet_var) when is_integer(value) do
     {:ok, Guard.literal(-value)}
   end
 
-  defp parse_operand({name, _, context}) when is_atom(name) and is_atom(context) do
+  # Handle byte_size(packet) when packet is the full packet variable
+  defp parse_operand({:byte_size, _, [{var_name, _, context}]}, packet_var)
+       when is_atom(var_name) and is_atom(context) and var_name == packet_var and packet_var != nil do
+    {:ok, :packet_len}
+  end
+
+  defp parse_operand({name, _, context}, _packet_var) when is_atom(name) and is_atom(context) do
     {:ok, Guard.binding(name)}
   end
 
   # Arithmetic expressions as operands
-  defp parse_operand({:+, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({:+, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_arith(:add, l, r)}
     end
   end
 
-  defp parse_operand({:-, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({:-, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_arith(:sub, l, r)}
     end
   end
 
-  defp parse_operand({:*, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({:*, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_arith(:mul, l, r)}
     end
   end
 
-  defp parse_operand({:div, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({:div, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_arith(:div, l, r)}
     end
   end
 
   # Bitwise operations as operands (for expressions like `band(x, 0x0F) == 5`)
-  defp parse_operand({:band, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({:band, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:band, l, r)}
     end
   end
 
-  defp parse_operand({:bor, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({:bor, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:bor, l, r)}
     end
   end
 
-  defp parse_operand({:bxor, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({:bxor, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:bxor, l, r)}
     end
   end
 
-  defp parse_operand({:bnot, _, [expr]}) do
-    with {:ok, e} <- parse_operand(expr) do
+  defp parse_operand({:bnot, _, [expr]}, packet_var) do
+    with {:ok, e} <- parse_operand(expr, packet_var) do
       {:ok, fold_bitwise(:bnot, e, nil)}
     end
   end
 
   # Bitwise module qualified calls as operands (e.g., Bitwise.band(x, 0x0F))
-  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :band]}, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:band, l, r)}
     end
   end
 
-  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bor]}, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:bor, l, r)}
     end
   end
 
-  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]}) do
-    with {:ok, l} <- parse_operand(left),
-         {:ok, r} <- parse_operand(right) do
+  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bxor]}, _, [left, right]}, packet_var) do
+    with {:ok, l} <- parse_operand(left, packet_var),
+         {:ok, r} <- parse_operand(right, packet_var) do
       {:ok, fold_bitwise(:bxor, l, r)}
     end
   end
 
-  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bnot]}, _, [expr]}) do
-    with {:ok, e} <- parse_operand(expr) do
+  defp parse_operand({{:., _, [{:__aliases__, _, [:Bitwise]}, :bnot]}, _, [expr]}, packet_var) do
+    with {:ok, e} <- parse_operand(expr, packet_var) do
       {:ok, fold_bitwise(:bnot, e, nil)}
     end
   end
 
-  defp parse_operand(other) do
+  defp parse_operand(other, _packet_var) do
     {:error, {:invalid_operand, other}}
   end
 
@@ -430,16 +455,16 @@ defmodule BPF.Parser do
   defp fold_bitwise(op, l, r), do: Guard.bitwise(op, l, r)
 
   # Parse return action from function body
-  defp parse_action(true), do: {:ok, :accept}
-  defp parse_action(false), do: {:ok, :reject}
-  defp parse_action(:accept), do: {:ok, :accept}
-  defp parse_action(:reject), do: {:ok, :reject}
-  defp parse_action(n) when is_integer(n) and n > 0, do: {:ok, {:accept, n}}
-  defp parse_action(0), do: {:ok, :reject}
+  defp parse_action(true, _packet_var), do: {:ok, :accept}
+  defp parse_action(false, _packet_var), do: {:ok, :reject}
+  defp parse_action(:accept, _packet_var), do: {:ok, :accept}
+  defp parse_action(:reject, _packet_var), do: {:ok, :reject}
+  defp parse_action(n, _packet_var) when is_integer(n) and n > 0, do: {:ok, {:accept, n}}
+  defp parse_action(0, _packet_var), do: {:ok, :reject}
 
-  defp parse_action(expr) do
+  defp parse_action(expr, packet_var) do
     # Try to parse as an expression (may contain bindings)
-    case parse_operand(expr) do
+    case parse_operand(expr, packet_var) do
       {:ok, {:literal, n}} when n > 0 ->
         {:ok, {:accept, n}}
 
@@ -451,7 +476,7 @@ defmodule BPF.Parser do
 
       {:error, _} ->
         # Try parsing as a guard condition (comparison expression)
-        case parse_guard(expr) do
+        case parse_guard(expr, packet_var) do
           {:ok, guard} -> {:ok, {:return_cond, guard}}
           {:error, _} -> {:error, {:invalid_action, expr}}
         end

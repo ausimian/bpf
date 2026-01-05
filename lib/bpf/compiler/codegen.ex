@@ -66,6 +66,22 @@ defmodule BPF.Compiler.CodeGen do
     end
   end
 
+  # Load packet length
+  defp generate_op({:load_len, vreg}, state) do
+    alloc = Map.get(state.allocation, vreg)
+
+    state = emit(state, {:ld, :len})
+
+    case alloc do
+      {:mem, slot} ->
+        state = emit(state, {:st, slot})
+        %{state | reg_a: {:vreg, vreg}}
+
+      :a ->
+        %{state | reg_a: {:vreg, vreg}}
+    end
+  end
+
   # ALU operation
   defp generate_op({:alu, vreg, op, src1, src2}, state) do
     # Apply operation with src2

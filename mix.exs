@@ -1,13 +1,18 @@
 defmodule BPF.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @source_url "https://github.com/ausimian/bpf"
+
   def project do
     [
       app: :bpf,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      package: package(),
+      description: description(),
 
       # Test coverage
       test_coverage: [tool: ExCoveralls],
@@ -21,11 +26,33 @@ defmodule BPF.MixProject do
 
       # Docs
       name: "BPF",
-      source_url: "https://github.com/yourname/bpf",
+      source_url: @source_url,
+      homepage_url: @source_url,
       docs: [
         main: "BPF",
-        extras: ["README.md"]
+        extras: ["README.md", "LICENSE.md"],
+        source_ref: @version
       ]
+    ]
+  end
+
+  defp description do
+    """
+    Compile Elixir binary pattern matching to classic BPF bytecode.
+
+    Write packet filters using familiar Elixir syntax with binary patterns and guards,
+    and compile them to BPF programs for use with sockets or libpcap.
+    """
+  end
+
+  defp package do
+    [
+      name: "bpf",
+      licenses: ["MIT"],
+      links: %{
+        "GitHub" => @source_url
+      },
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE.md)
     ]
   end
 

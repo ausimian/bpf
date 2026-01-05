@@ -1,5 +1,7 @@
 # BPF
 
+> **Note:** This library is a work in progress and not yet suitable for production use.
+
 A library for compiling Elixir binary pattern matching expressions into classic BPF (Berkeley Packet Filter) bytecode.
 
 Write packet filters using familiar Elixir syntax and compile them to BPF programs that can be attached to sockets or used with `libpcap`.

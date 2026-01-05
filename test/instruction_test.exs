@@ -233,6 +233,87 @@ defmodule BPF.InstructionTest do
     end
   end
 
+  # These examples are taken directly from the Linux kernel documentation
+  # to verify our encoding matches the kernel's BPF implementation.
+  # Source: https://www.kernel.org/doc/html/latest/networking/filter.html
+  describe "encode/1 Linux kernel examples" do
+    # ARP filter from kernel docs:
+    # { 0x28,  0,  0, 0x0000000c },  ldh [12]
+    # { 0x15,  0,  1, 0x00000806 },  jeq #0x806, jt=0, jf=1
+    # { 0x06,  0,  0, 0xffffffff },  ret accept
+    # { 0x06,  0,  0, 0x00000000 },  ret reject
+    test "ARP filter - ldh [12]" do
+      assert {0x28, 0, 0, 0x0C} = Instruction.encode({:ld, :h, [:k, 12]})
+    end
+
+    test "ARP filter - jeq #0x806" do
+      assert {0x15, 0, 1, 0x806} = Instruction.encode({:jmp, :jeq, :k, 0x806, 0, 1})
+    end
+
+    test "ARP filter - ret accept" do
+      assert {0x06, 0, 0, 0xFFFFFFFF} = Instruction.encode({:ret, :k, 0xFFFFFFFF})
+    end
+
+    test "ARP filter - ret reject" do
+      assert {0x06, 0, 0, 0} = Instruction.encode({:ret, :k, 0})
+    end
+
+    # Port 22 filter examples from kernel docs:
+    # { 0x30,  0,  0, 0x00000014 },  ldb [20]
+    # { 0x45,  6,  0, 0x00001fff },  jset #0x1fff, jt=6, jf=0
+    # { 0xb1,  0,  0, 0x0000000e },  ldx msh [14]
+    # { 0x48,  0,  0, 0x0000000e },  ldh [x+14]
+    test "port 22 filter - ldb [20]" do
+      assert {0x30, 0, 0, 0x14} = Instruction.encode({:ld, :b, [:k, 20]})
+    end
+
+    test "port 22 filter - jset #0x1fff" do
+      assert {0x45, 6, 0, 0x1FFF} = Instruction.encode({:jmp, :jset, :k, 0x1FFF, 6, 0})
+    end
+
+    test "port 22 filter - ldx msh [14]" do
+      assert {0xB1, 0, 0, 0x0E} = Instruction.encode({:ldx, :msh, 14})
+    end
+
+    test "port 22 filter - ldh [x+14]" do
+      assert {0x48, 0, 0, 0x0E} = Instruction.encode({:ld, :h, [:x, 14]})
+    end
+
+    # IPv6 check from port 22 filter:
+    # { 0x15,  0,  8, 0x000086dd },  jeq #0x86dd (IPv6), jt=0, jf=8
+    test "port 22 filter - jeq IPv6 ethertype" do
+      assert {0x15, 0, 8, 0x86DD} = Instruction.encode({:jmp, :jeq, :k, 0x86DD, 0, 8})
+    end
+
+    # IPv4 check:
+    # { 0x15,  0, 12, 0x00000800 },  jeq #0x800 (IPv4)
+    test "port 22 filter - jeq IPv4 ethertype" do
+      assert {0x15, 0, 12, 0x800} = Instruction.encode({:jmp, :jeq, :k, 0x800, 0, 12})
+    end
+
+    # Protocol checks (TCP=6, UDP=17, SCTP=132):
+    # { 0x15,  2,  0, 0x00000084 },  jeq #132 (SCTP)
+    # { 0x15,  1,  0, 0x00000006 },  jeq #6 (TCP)
+    # { 0x15,  0, 17, 0x00000011 },  jeq #17 (UDP)
+    test "port 22 filter - jeq SCTP protocol" do
+      assert {0x15, 2, 0, 132} = Instruction.encode({:jmp, :jeq, :k, 132, 2, 0})
+    end
+
+    test "port 22 filter - jeq TCP protocol" do
+      assert {0x15, 1, 0, 6} = Instruction.encode({:jmp, :jeq, :k, 6, 1, 0})
+    end
+
+    test "port 22 filter - jeq UDP protocol" do
+      assert {0x15, 0, 17, 17} = Instruction.encode({:jmp, :jeq, :k, 17, 0, 17})
+    end
+
+    # Return with snaplen:
+    # { 0x06,  0,  0, 0x0000ffff },  ret #65535
+    test "port 22 filter - ret snaplen" do
+      assert {0x06, 0, 0, 0xFFFF} = Instruction.encode({:ret, :k, 0xFFFF})
+    end
+  end
+
   describe "to_binary/1" do
     test "produces 8 bytes per instruction" do
       binary = Instruction.to_binary({:ld, :b, [:k, 0]})

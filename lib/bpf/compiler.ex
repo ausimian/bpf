@@ -42,7 +42,10 @@ defmodule BPF.Compiler do
     %{
       scratch_next: 0,
       scratch_map: %{},
-      label_counter: 0
+      label_counter: 0,
+      # Register allocation: track what's currently in A
+      # Can be: nil, {:binding, name}, {:literal, value}, or :unknown
+      reg_a: nil
     }
   end
 
@@ -137,6 +140,8 @@ defmodule BPF.Compiler do
           {:jmp, :jeq, :k, value, 0, {:label_ref, fail_label}}
         ]
 
+        # After literal check, A holds some packet data (not a named binding)
+        state = %{state | reg_a: :unknown}
         {instrs, state}
 
       # Sub-byte field - need to load byte and mask/shift
@@ -176,6 +181,8 @@ defmodule BPF.Compiler do
         ]
       end
 
+    # After literal check, A holds some packet data (not a named binding)
+    state = %{state | reg_a: :unknown}
     {instrs, state}
   end
 
@@ -244,16 +251,15 @@ defmodule BPF.Compiler do
         byte_offset = div(offset_bits, 8)
         size_atom = size_to_atom(size_bits)
 
-        instrs = [
-          {:ld, size_atom, [:k, byte_offset]},
-          {:st, slot}
-        ]
+        instrs = [{:ld, size_atom, [:k, byte_offset]}, {:st, slot}]
 
+        # Track that A now holds this binding
+        state = %{state | reg_a: {:binding, name}}
         {instrs, state}
 
       # Sub-byte field
       size_bits < 8 ->
-        compile_subbyte_binding_load(offset_bits, size_bits, slot, state)
+        compile_subbyte_binding_load(name, offset_bits, size_bits, slot, state)
 
       # Other cases
       true ->
@@ -261,7 +267,7 @@ defmodule BPF.Compiler do
     end
   end
 
-  defp compile_subbyte_binding_load(offset_bits, size_bits, slot, state) do
+  defp compile_subbyte_binding_load(name, offset_bits, size_bits, slot, state) do
     byte_offset = div(offset_bits, 8)
     bit_offset_in_byte = rem(offset_bits, 8)
 
@@ -270,20 +276,13 @@ defmodule BPF.Compiler do
 
     instrs =
       if shift_amount > 0 do
-        [
-          {:ld, :b, [:k, byte_offset]},
-          {:rsh, shift_amount},
-          {:and, mask},
-          {:st, slot}
-        ]
+        [{:ld, :b, [:k, byte_offset]}, {:rsh, shift_amount}, {:and, mask}, {:st, slot}]
       else
-        [
-          {:ld, :b, [:k, byte_offset]},
-          {:and, mask},
-          {:st, slot}
-        ]
+        [{:ld, :b, [:k, byte_offset]}, {:and, mask}, {:st, slot}]
       end
 
+    # Track that A now holds this binding
+    state = %{state | reg_a: {:binding, name}}
     {instrs, state}
   end
 
@@ -386,12 +385,26 @@ defmodule BPF.Compiler do
 
   # Load an operand into the accumulator
   defp load_operand_to_a({:binding, name}, state) do
-    slot = get_scratch(state, name)
-    {[{:ld, :mem, slot}], state}
+    # Check if A already holds this binding
+    if state.reg_a == {:binding, name} do
+      # Already in A, no load needed
+      {[], state}
+    else
+      # Need to load from scratch memory
+      slot = get_scratch(state, name)
+      state = %{state | reg_a: {:binding, name}}
+      {[{:ld, :mem, slot}], state}
+    end
   end
 
   defp load_operand_to_a({:literal, value}, state) do
-    {[{:ld, :imm, value}], state}
+    # Check if A already holds this literal
+    if state.reg_a == {:literal, value} do
+      {[], state}
+    else
+      state = %{state | reg_a: {:literal, value}}
+      {[{:ld, :imm, value}], state}
+    end
   end
 
   defp load_operand_to_a({:arith, op, left, right}, state) do
@@ -402,11 +415,15 @@ defmodule BPF.Compiler do
     case right do
       {:literal, value} ->
         alu_instr = arith_to_alu(op, value)
+        # A now holds result of arithmetic operation
+        state = %{state | reg_a: :unknown}
         {left_instrs ++ [alu_instr], state}
 
       {:binding, name} ->
         slot = get_scratch(state, name)
         # Load right into X, then operate
+        # A now holds result of arithmetic operation
+        state = %{state | reg_a: :unknown}
         {left_instrs ++ [{:st, 15}, {:ld, :mem, slot}, :tax, {:ld, :mem, 15}, arith_to_alu_x(op)],
          state}
 
@@ -418,6 +435,8 @@ defmodule BPF.Compiler do
           left_instrs ++
             [{:st, 15}] ++ right_instrs ++ [:tax, {:ld, :mem, 15}, arith_to_alu_x(op)]
 
+        # A now holds result of arithmetic operation
+        state = %{state | reg_a: :unknown}
         {instrs, state}
     end
   end
@@ -428,15 +447,21 @@ defmodule BPF.Compiler do
     case right do
       {:literal, value} ->
         alu_instr = bitwise_to_alu(op, value)
+        # A now holds result of bitwise operation
+        state = %{state | reg_a: :unknown}
         {left_instrs ++ [alu_instr], state}
 
       {:binding, name} ->
         slot = get_scratch(state, name)
+        # A now holds result of bitwise operation
+        state = %{state | reg_a: :unknown}
         {left_instrs ++ [{:st, 15}, {:ld, :mem, slot}, :tax, {:ld, :mem, 15}, bitwise_to_alu_x(op)],
          state}
 
       nil ->
         # Unary op (bnot) - bitwise NOT is XOR with all 1s
+        # A now holds result of bitwise operation
+        state = %{state | reg_a: :unknown}
         {left_instrs ++ [{:xor, 0xFFFFFFFF}], state}
 
       _ ->
@@ -446,6 +471,8 @@ defmodule BPF.Compiler do
           left_instrs ++
             [{:st, 15}] ++ right_instrs ++ [:tax, {:ld, :mem, 15}, bitwise_to_alu_x(op)]
 
+        # A now holds result of bitwise operation
+        state = %{state | reg_a: :unknown}
         {instrs, state}
     end
   end
@@ -457,6 +484,7 @@ defmodule BPF.Compiler do
   defp prepare_comparison_right({:binding, name}, state) do
     slot = get_scratch(state, name)
     # Save A to slot 14 (reserved for comparison), load binding into X, restore A
+    # After this sequence, A is restored to what it was before
     {[{:st, 14}, {:ld, :mem, slot}, :tax, {:ld, :mem, 14}], :x, state}
   end
 
@@ -464,7 +492,11 @@ defmodule BPF.Compiler do
     # Save A to slot 14 (reserved for comparison), evaluate complex expression,
     # put result in X, restore A from slot 14.
     # We use slot 14 because load_operand_to_a uses slot 15 for intermediate operations.
+    # Save what's in A before we clobber it
+    saved_reg_a = state.reg_a
     {instrs, state} = load_operand_to_a(expr, state)
+    # After restoring from slot 14, A has the saved value
+    state = %{state | reg_a: saved_reg_a}
     {[{:st, 14}] ++ instrs ++ [:tax, {:ld, :mem, 14}], :x, state}
   end
 

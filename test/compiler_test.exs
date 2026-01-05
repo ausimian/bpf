@@ -951,4 +951,56 @@ defmodule BPF.CompilerTest do
       assert {:ok, 0} = Interpreter.run(prog, <<10>>)
     end
   end
+
+  describe "compile/1 register allocation optimization" do
+    test "eliminates redundant load after binding store" do
+      # This pattern used to generate: st 0, ld mem 0, jeq
+      # Now it should generate: st 0, jeq (skipping the redundant load)
+      ast = quote do: fn <<4::4, flags::4, _::binary>> when flags == 8 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      # Verify the program works correctly
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<0x48, 0x00>>)
+      assert {:ok, 0} = Interpreter.run(prog, <<0x49, 0x00>>)
+      assert {:ok, 0} = Interpreter.run(prog, <<0x58, 0x00>>)
+
+      # Verify there's no {:ld, :mem, 0} immediately after {:st, 0}
+      # (i.e., the redundant load was eliminated)
+      instrs = prog.instructions
+      st_indices = Enum.with_index(instrs) |> Enum.filter(fn {i, _} -> match?({:st, _}, i) end) |> Enum.map(&elem(&1, 1))
+
+      for st_idx <- st_indices do
+        next_instr = Enum.at(instrs, st_idx + 1)
+        # The instruction after st should NOT be ld mem with the same slot
+        {_, st_slot} = Enum.at(instrs, st_idx)
+        refute match?({:ld, :mem, ^st_slot}, next_instr),
+               "Found redundant {:ld, :mem, #{st_slot}} immediately after {:st, #{st_slot}}"
+      end
+    end
+
+    test "reuses value in A when binding used multiple times" do
+      # When a binding is used twice, second use should reuse A if possible
+      ast = quote do: fn <<x::8, y::8>> when x > 5 and x < 10 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      # Verify correctness
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<7, 0>>)
+      assert {:ok, 0} = Interpreter.run(prog, <<5, 0>>)
+      assert {:ok, 0} = Interpreter.run(prog, <<10, 0>>)
+    end
+
+    test "loads from scratch when A was clobbered" do
+      # When another operation clobbers A, we need to reload from scratch
+      ast = quote do: fn <<x::8, y::8>> when x + y > 10 and x > 3 -> true end
+      {:ok, clauses} = Parser.parse(ast)
+      {:ok, prog} = Compiler.compile(clauses)
+
+      # Verify correctness: x + y > 10 AND x > 3
+      assert {:ok, 0xFFFFFFFF} = Interpreter.run(prog, <<5, 10>>)  # 5+10=15>10, 5>3
+      assert {:ok, 0} = Interpreter.run(prog, <<3, 10>>)  # 3+10=13>10, but 3>3 is false
+      assert {:ok, 0} = Interpreter.run(prog, <<5, 2>>)   # 5+2=7, not >10
+    end
+  end
 end

@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/ausimian/bpf/actions/workflows/ci.yml/badge.svg)](https://github.com/ausimian/bpf/actions/workflows/ci.yml)
 [![Coverage Status](https://coveralls.io/repos/github/ausimian/bpf/badge.svg?branch=main)](https://coveralls.io/github/ausimian/bpf?branch=main)
+[![Hex.pm](https://img.shields.io/hexpm/v/bpf.svg)](https://hex.pm/packages/bpf)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/bpf)
 
 > **Note:** This library is a work in progress and not yet suitable for production use.
 

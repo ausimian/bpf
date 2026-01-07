@@ -117,7 +117,6 @@ defmodule BPF do
           {:jmp, :jeq, :k, 4, 1, 0},
           {:jmp, :jeq, :k, 6, 0, 1},
           {:ret, :k, 4294967295},
-          {:ret, :k, 0},
           {:ret, :k, 0}
         ],
         bindings: %{version: 0}

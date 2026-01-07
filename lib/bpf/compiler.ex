@@ -33,8 +33,16 @@ defmodule BPF.Compiler do
         [{:label, :"clause_#{idx}"}] ++ code ++ [{:label, fail_label}]
       end)
 
-    # Add final reject
-    instructions = instructions ++ [{:label, :final_reject}, {:ret, :k, @reject_value}]
+    # Determine the fail label for the last clause
+    last_clause_fail_label = :"clause_#{length(clauses) - 1}_fail"
+
+    # Add final reject (only if needed - i.e., if any jump references the last clause's fail label)
+    instructions =
+      if needs_final_reject?(instructions, last_clause_fail_label) do
+        instructions ++ [{:label, :final_reject}, {:ret, :k, @reject_value}]
+      else
+        instructions ++ [{:label, :final_reject}]
+      end
 
     # Resolve labels
     resolved = resolve_labels(instructions)
@@ -42,6 +50,19 @@ defmodule BPF.Compiler do
     bindings = collect_bindings(clauses)
 
     {:ok, Program.new(resolved, bindings)}
+  end
+
+  # Check if the final reject instruction is needed
+  # It's needed if any jump references the last clause's fail label
+  defp needs_final_reject?(instructions, last_clause_fail_label) do
+    Enum.any?(instructions, fn
+      {:jmp, _, _, _, {:label_ref, ^last_clause_fail_label}, _} -> true
+      {:jmp, _, _, _, _, {:label_ref, ^last_clause_fail_label}} -> true
+      {:jmp, _, _, {:label_ref, ^last_clause_fail_label}, _} -> true
+      {:jmp, _, _, _, {:label_ref, ^last_clause_fail_label}} -> true
+      {:jmp, _, {:label_ref, ^last_clause_fail_label}} -> true
+      _ -> false
+    end)
   end
 
   defp collect_bindings(clauses) do

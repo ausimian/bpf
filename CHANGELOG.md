@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for bare underscore patterns (`fn _ -> true end`) to accept or reject all packets
 
+### Fixed
+
+- Remove unreachable final reject instruction when last clause cannot fail
+
 ## [0.1.1] - 2025-01-05
 
 ### Added

@@ -11,6 +11,7 @@ defmodule BPF.MixProject do
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
       package: package(),
       description: description(),
 
@@ -39,9 +40,6 @@ defmodule BPF.MixProject do
   defp description do
     """
     Compile Elixir binary pattern matching to classic BPF bytecode.
-
-    Write packet filters using familiar Elixir syntax with binary patterns and guards,
-    and compile them to BPF programs for use with sockets or libpcap.
     """
   end
 
@@ -56,6 +54,18 @@ defmodule BPF.MixProject do
     ]
   end
 
+  def aliases do
+    [
+      "expublish.major": &expublish("expublish.major", &1),
+      "expublish.minor": &expublish("expublish.minor", &1),
+      "expublish.patch": &expublish("expublish.patch", &1),
+      "expublish.stable": &expublish("expublish.stable", &1),
+      "expublish.rc": &expublish("expublish.rc", &1),
+      "expublish.beta": &expublish("expublish.beta", &1),
+      "expublish.alpha": &expublish("expublish.alpha", &1)
+    ]
+  end
+
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
@@ -67,8 +77,19 @@ defmodule BPF.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.39", only: :dev, runtime: false},
+      {:expublish, "~> 2.5", only: [:dev], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:castore, "~> 1.0", only: :test}
     ]
+  end
+
+  defp expublish(task, args) do
+    common = ["--tag-prefix", "", "--commit-prefix", "Version", "--branch", ""]
+
+    if "--no-dry-run" in args do
+      Mix.Task.run(task, common ++ args)
+    else
+      Mix.Task.run(task, ["--dry-run" | common] ++ args)
+    end
   end
 end

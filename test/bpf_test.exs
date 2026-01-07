@@ -6,6 +6,21 @@ defmodule BPFTest do
   import BPF
 
   describe "compile/1 macro" do
+    test "compiles bare underscore pattern (accept all)" do
+      prog = compile(fn _ -> true end)
+      assert %BPF.Program{} = prog
+      assert BPF.interpret(prog, <<1, 2, 3>>)
+      assert BPF.interpret(prog, <<>>)
+      assert BPF.interpret(prog, :binary.copy(<<0>>, 1000))
+    end
+
+    test "compiles bare underscore pattern (reject all)" do
+      prog = compile(fn _ -> false end)
+      assert %BPF.Program{} = prog
+      refute BPF.interpret(prog, <<1, 2, 3>>)
+      refute BPF.interpret(prog, <<>>)
+    end
+
     test "compiles simple pattern" do
       prog = compile(fn <<x::8>> -> true end)
       assert %BPF.Program{} = prog

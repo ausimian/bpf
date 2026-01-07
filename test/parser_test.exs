@@ -185,7 +185,6 @@ defmodule BPF.ParserTest do
 
   describe "parse/1 multiple clauses" do
     test "parses multiple clauses" do
-      # Note: clauses with just `_` won't parse as they're not binary patterns
       ast =
         quote do
           fn
@@ -324,6 +323,18 @@ defmodule BPF.ParserTest do
     test "parses empty binary pattern" do
       ast = quote do: fn <<>> -> true end
       assert {:ok, [%Clause{pattern: pattern}]} = Parser.parse(ast)
+      assert pattern.segments == []
+    end
+
+    test "parses bare underscore pattern (accept all)" do
+      ast = quote do: fn _ -> true end
+      assert {:ok, [%Clause{pattern: pattern, guard: nil, action: :accept}]} = Parser.parse(ast)
+      assert pattern.segments == []
+    end
+
+    test "parses bare underscore pattern (reject all)" do
+      ast = quote do: fn _ -> false end
+      assert {:ok, [%Clause{pattern: pattern, guard: nil, action: :reject}]} = Parser.parse(ast)
       assert pattern.segments == []
     end
   end

@@ -75,6 +75,11 @@ defmodule BPF.Parser do
     parse_segments(segments, 0, [])
   end
 
+  # Bare underscore matches any packet (empty pattern)
+  defp parse_pattern({:_, _, _}) do
+    {:ok, Pattern.new([])}
+  end
+
   defp parse_pattern(other) do
     {:error, {:expected_binary_pattern, other}}
   end

@@ -30,7 +30,7 @@ defmodule BPF.MixProject do
       homepage_url: @source_url,
       docs: [
         main: "BPF",
-        extras: ["README.md", "LICENSE.md"],
+        extras: ["README.md", "CHANGELOG.md", "LICENSE.md"],
         source_ref: @version
       ]
     ]
@@ -52,7 +52,7 @@ defmodule BPF.MixProject do
       links: %{
         "GitHub" => @source_url
       },
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE.md)
+      files: ~w(lib .formatter.exs mix.exs README.md CHANGELOG.md LICENSE.md)
     ]
   end
 

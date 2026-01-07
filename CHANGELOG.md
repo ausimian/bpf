@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- %% CHANGELOG_ENTRIES %% -->
 
+## 0.1.2 - 2026-01-07
+
+### Added
+
+- Support for bare underscore patterns (`fn _ -> true end`) to accept or reject all packets
+- Add expublish for release management
+
+### Fixed
+
+- Remove unreachable final reject instruction when last clause cannot fail
+
+### Changed
+
+- Remove publish-to-hex step from CI (publishing done locally via expublish)
+
+
 
 ## 0.1.1 - 2025-01-05
 

@@ -1,12 +1,3 @@
 ### Added
 
-- Support for bare underscore patterns (`fn _ -> true end`) to accept or reject all packets
-- Add expublish for release management
-
-### Fixed
-
-- Remove unreachable final reject instruction when last clause cannot fail
-
-### Changed
-
-- Remove publish-to-hex step from CI (publishing done locally via expublish)
+- Constant folding for size spec expressions (e.g., `<<x::4*8>>`, `<<x::16+16>>`, `<<x::div(32, 4)>>`)

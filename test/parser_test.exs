@@ -785,6 +785,63 @@ defmodule BPF.ParserTest do
     end
   end
 
+  describe "parse/1 size spec constant folding" do
+    test "folds multiplication in size spec" do
+      ast = quote do: fn <<x::4*8>> -> true end
+      assert {:ok, [%Clause{pattern: pattern}]} = Parser.parse(ast)
+      [seg] = pattern.segments
+      assert seg.size == 32
+    end
+
+    test "folds addition in size spec" do
+      ast = quote do: fn <<x::16+16>> -> true end
+      assert {:ok, [%Clause{pattern: pattern}]} = Parser.parse(ast)
+      [seg] = pattern.segments
+      assert seg.size == 32
+    end
+
+    test "folds division in size spec" do
+      ast = quote do: fn <<x::div(32, 4)>> -> true end
+      assert {:ok, [%Clause{pattern: pattern}]} = Parser.parse(ast)
+      [seg] = pattern.segments
+      assert seg.size == 8
+    end
+
+    test "folds nested expression in size spec" do
+      ast = quote do: fn <<x::2*8+8>> -> true end
+      assert {:ok, [%Clause{pattern: pattern}]} = Parser.parse(ast)
+      [seg] = pattern.segments
+      # 2*8+8 = 16+8 = 24
+      assert seg.size == 24
+    end
+
+    test "folds complex multiplication in size spec" do
+      ast = quote do: fn <<_::8, x::4*8, _::binary>> -> true end
+      assert {:ok, [%Clause{pattern: pattern}]} = Parser.parse(ast)
+      [_skip, binding, _rest] = pattern.segments
+      assert binding.size == 32
+      assert binding.offset == 8
+    end
+
+    test "returns error for non-constant expression in size spec" do
+      # <<x::n*8>> where n is a variable
+      ast =
+        {:fn, [],
+         [
+           {:->, [],
+            [
+              [
+                {:<<>>, [],
+                 [{:"::", [], [{:x, [], nil}, {:*, [], [{:n, [], nil}, 8]}]}]}
+              ],
+              true
+            ]}
+         ]}
+
+      assert {:error, {:non_constant_size_expr, {:n, [], nil}}} = Parser.parse(ast)
+    end
+  end
+
   describe "parse/1 constant folding 32-bit clamping" do
     @max_u32 0xFFFFFFFF
 

@@ -181,6 +181,28 @@ defmodule BPF.Parser do
     {:ok, 1, [unit: n]}
   end
 
+  # Constant expressions in size specs (e.g., 4*8, 16+4)
+  defp parse_size_spec({:*, _, [left, right]}) do
+    with {:ok, l} <- eval_const_expr(left),
+         {:ok, r} <- eval_const_expr(right) do
+      {:ok, l * r, []}
+    end
+  end
+
+  defp parse_size_spec({:+, _, [left, right]}) do
+    with {:ok, l} <- eval_const_expr(left),
+         {:ok, r} <- eval_const_expr(right) do
+      {:ok, l + r, []}
+    end
+  end
+
+  defp parse_size_spec({:div, _, [left, right]}) do
+    with {:ok, l} <- eval_const_expr(left),
+         {:ok, r} <- eval_const_expr(right) do
+      {:ok, div(l, r), []}
+    end
+  end
+
   # Variable size (not supported in BPF)
   defp parse_size_spec({name, _, _}) when is_atom(name) do
     {:error, {:variable_size_not_supported, name}}
@@ -188,6 +210,41 @@ defmodule BPF.Parser do
 
   defp parse_size_spec(other) do
     {:error, {:invalid_size_spec, other}}
+  end
+
+  # Evaluate constant expressions for size specs
+  defp eval_const_expr(n) when is_integer(n), do: {:ok, n}
+
+  defp eval_const_expr({:*, _, [left, right]}) do
+    with {:ok, l} <- eval_const_expr(left),
+         {:ok, r} <- eval_const_expr(right) do
+      {:ok, l * r}
+    end
+  end
+
+  defp eval_const_expr({:+, _, [left, right]}) do
+    with {:ok, l} <- eval_const_expr(left),
+         {:ok, r} <- eval_const_expr(right) do
+      {:ok, l + r}
+    end
+  end
+
+  defp eval_const_expr({:-, _, [left, right]}) do
+    with {:ok, l} <- eval_const_expr(left),
+         {:ok, r} <- eval_const_expr(right) do
+      {:ok, l - r}
+    end
+  end
+
+  defp eval_const_expr({:div, _, [left, right]}) do
+    with {:ok, l} <- eval_const_expr(left),
+         {:ok, r} <- eval_const_expr(right) do
+      {:ok, div(l, r)}
+    end
+  end
+
+  defp eval_const_expr(other) do
+    {:error, {:non_constant_size_expr, other}}
   end
 
   # Handle both size() and modifiers for combined expressions like binary-size(12)
